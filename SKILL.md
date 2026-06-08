@@ -8,7 +8,7 @@ keywords: [workflow, parallel, multi-agent, research, review, pipeline, plan, br
 argument-hint: "<template> <args> [--agents N] OR --arena <prompt>"
 metadata:
   author: user
-  version: "4.1.0"
+  version: "4.2.0"
 ---
 
 # Ultraflow — Parallel Agent Workflows
@@ -101,7 +101,7 @@ Extract the JS code block from the reference file verbatim. The only substitutio
 ## After Workflow completes
 
 - Report results to user in clean markdown
-- `arena`: routed intent + producer/contesters used + JUDGE verdict (ACCEPT/REVISE/REJECT) + prioritized required actions; if files were mutated, remind to merge the worktree branch
+- `arena`: routed intent + producer (Gladiator) / contesters (Challengers) used + Caesar's verdict (ACCEPT/REVISE/REJECT) + prioritized required actions, then run the **Arena ending** protocol below
 - `scout`: context map with file table + patterns + contracts + risks
 - `brainstorm`: synthesis with winner, trade-offs, next steps
 - `plan`: plan document path + phase summary; save to `./plans/`
@@ -111,3 +111,34 @@ Extract the JS code block from the reference file verbatim. The only substitutio
 - `research`: exec summary + key recommendations
 - `review`: counts (CRITICAL/IMPORTANT/MODERATE) + action items
 - Ask if user wants to save the report to `plans/reports/`
+
+## Arena ending (post-verdict next steps)
+
+After an `arena` run, read Caesar's FULL verdict text — verdict parsing stays at YOUR layer, never trust a single token in isolation (the script does no verdict logic). The return gives you the data: `verdict` (full text), `round`, `intent`, `mutatedFiles`, `branch`, `agents`, and an `error` field on technical aborts. Present a short, actionable closing menu for the matched case.
+
+**Safety rule (always):** ASK before any mutate / merge / commit / push. Only read-only steps (suggesting, saving a report) may run without asking. If the verdict token is unclear or missing, default to the SAFE side — treat as needs-human-review, never auto-ACCEPT.
+
+**👍 ACCEPT (ÂN XÁ) — ship it:**
+- Non-mutating intent (plan / research / review / debug): offer to save the report to `plans/reports/`, and suggest the natural next workflow step (e.g. plan → `/man:ultraflow cook`).
+- Mutating intent (cook / fix): a worktree `branch` exists. Resolve its path with `git worktree list`, then (ask first) `git merge <branch>` → `/ck:git` commit → optionally push → `git worktree remove <path>`.
+- `mutatedFiles` true but `branch` null: tell the user to find the branch via `git worktree list` (the Gladiator dropped its `BRANCH:` footer).
+
+**✊ REVISE (TÁI ĐẤU) — fix upheld items, then let the user choose:**
+- **(a) Fix directly** with the ck: skill matching the ORIGINAL `intent`: implement → `/ck:cook` (or hand-edit), fix → `/ck:fix`, plan → `/ck:plan`, review code → `/ck:cook`/hand-edit then re-review (NOT `ck:fix` on a review report).
+- **(b) Re-enter the arena** with the auto-generated prompt (format below).
+- **Round cap (advisory):** if the returned `round` ≥ 3 and the verdict is still REVISE, do NOT offer path (b) — escalate to the user instead of looping.
+- Mutating intent: warn that a re-run may create a NEW branch (no `--branch` arg to reuse the old one) — guide a manual merge.
+
+**👎 REJECT (KHAI TỬ) — wrong approach, step back:** do NOT offer a same-approach re-run. Suggest `/man:ultraflow brainstorm "<problem>"` or `/man:ultraflow plan "<task>" --mode hard` to rethink. If a branch was created, offer to discard it (`git worktree list` → `git worktree remove` + `git branch -D`).
+
+**Auto-generated re-run prompt (REVISE path b)** — anchor the original intent and bump the round so the Lanista routes consistently and the counter survives a stateless engine:
+```
+[TÁI ĐẤU vòng <round+1> — intent: <intent>] <Caesar's required actions, condensed into one concrete task>
+```
+
+**Technical / edge cases (the return carries an `error` field):**
+- `empty-prompt` → show the correct syntax.
+- `router failed` / `no contesters` (Lanista) → report and offer to re-run.
+- `producer failed` (Gladiator) → offer to re-run, or use the ck: skill directly.
+- `all contesters failed` → the `artifact` is in the return; offer a manual `/ck:code-review` on it (do NOT "re-run the contest" — a re-run makes a new artifact, not a re-attack of the old one).
+- Partial coverage (challengers that reported < `agents`, visible in logs) → note the thinner adversarial coverage; consider re-running.

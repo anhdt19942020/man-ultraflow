@@ -24,11 +24,11 @@ This is the meta-entry point: you give a plain prompt, the Lanista picks the rig
 
 | Prompt intent | PRODUCE (ck:) | CONTEST (ck:) | N | Contest what |
 |---|---|---|---|---|
-| implement / code / build / add feature | `ck:cook` (mutates) | `ck:code-review` + `ck:test` | 2-3 | bugs, regressions, broken contracts, missing tests |
+| implement / code / build / add feature | `ck:cook` (mutates) | `ck:code-review` + `ck:security` + `ck:test` | 3 | logic bugs, exploitable holes, regressions, broken contracts, missing tests |
 | plan / architect / design / roadmap | `ck:plan` | `ck:predict` + `ck:scenario` | 2-3 | false assumptions, missing edge cases, over-engineering, infeasibility |
-| fix bug / error / failing test | `ck:fix` (mutates) | `ck:debug` + `ck:code-review` | 2-3 | wrong root cause, regressions |
-| debug / find root cause / why | `ck:debug` | additional `ck:debug` investigators (distinct hypothesis each) | 3 | competing hypotheses |
-| research / find info / compare | `ck:research` | research verifiers (distinct angle each) | 2-3 | wrong/unsourced claims, missing data |
+| fix bug / error / failing test | `ck:fix` (mutates) | `ck:debug` + `ck:code-review` (+ `ck:test` if the fix touches logic) | 2-3 | wrong root cause, regressions, untested fix paths |
+| debug / find root cause / why | `ck:debug` | additional `ck:debug` investigators (each assigned a DISTINCT hypothesis via `contest_angles`) | 3 | competing hypotheses |
+| research / find info / compare | `ck:research` | research verifiers (each assigned a DISTINCT angle via `contest_angles`; one chases disconfirming sources) | 2-3 | wrong/unsourced claims, missing data |
 | security / audit / vulnerability | `ck:security` | red-team attackers (`ck:security`) | 3 | exploitable holes |
 | review code | `ck:code-review` | `ck:code-review` + `ck:security` (if input/auth/storage) | 3 | missed bugs, exploitable holes |
 
@@ -50,6 +50,8 @@ export const meta = {
 const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args || {}) } catch (e) { return {} } })()
 const prompt = A.prompt || 'the given task'
 const nOverride = A.n
+// Durable round counter (the engine is stateless between --arena calls): parse it from the prompt's "[TÁI ĐẤU vòng N]" tag.
+const round = Number((prompt.match(/TÁI ĐẤU vòng (\d+)/) || [])[1]) || 1
 
 // Abort early on an empty prompt instead of running a full PRODUCE→CONTEST→JUDGE cycle on a placeholder.
 if (!A.prompt) {
@@ -68,11 +70,11 @@ const MODELS = ['opus', 'sonnet', 'haiku']
 const modelOpt = (m) => (MODELS.includes(m) ? { model: m } : {})
 
 const ROUTING_TABLE = `
-- implement / code / build / add feature  → producer ck:cook (dir cook, mutates=true) | contesters [ck:code-review (ck-code-review), ck:test (test)] | contest: bugs, regressions, broken contracts, missing tests
+- implement / code / build / add feature  → producer ck:cook (dir cook, mutates=true) | n=3 | contesters [ck:code-review (ck-code-review), ck:security (ck-security), ck:test (test)] | contest: logic bugs, exploitable holes, regressions, broken contracts, missing tests
 - plan / architect / design / roadmap     → producer ck:plan (dir ck-plan, mutates=false) | contesters [ck:predict (ck-predict), ck:scenario (ck-scenario)] | contest: false assumptions, missing edge cases, over-engineering, infeasibility
-- fix bug / error / failing test          → producer ck:fix (dir fix, mutates=true) | contesters [ck:debug (ck-debug), ck:code-review (ck-code-review)] | contest: wrong root cause, regressions
-- debug / find root cause / why           → producer ck:debug (dir ck-debug, mutates=false) | contesters [ck:debug (ck-debug)] | contest: competing hypotheses — each investigator MUST pursue a DISTINCT hypothesis
-- research / find info / compare          → producer ck:research (dir research, mutates=false) | contesters [ck:research (research)] | contest: wrong/unsourced claims, missing data — each verifier MUST take a DISTINCT angle (one seeks disconfirming sources)
+- fix bug / error / failing test          → producer ck:fix (dir fix, mutates=true) | contesters [ck:debug (ck-debug), ck:code-review (ck-code-review), + ck:test (test) ONLY if the fix touches logic] | contest: wrong root cause, regressions, untested fix paths
+- debug / find root cause / why           → producer ck:debug (dir ck-debug, mutates=false) | contesters [ck:debug (ck-debug)] | contest: competing hypotheses — each investigator pursues a DISTINCT hypothesis assigned via contest_angles
+- research / find info / compare          → producer ck:research (dir research, mutates=false) | contesters [ck:research (research)] | contest: wrong/unsourced claims, missing data — each verifier takes a DISTINCT angle assigned via contest_angles (one seeks disconfirming sources)
 - security / audit / vulnerability        → producer ck:security (dir ck-security, mutates=false) | contesters [ck:security (ck-security)] | contest: exploitable holes
 - review code / review PR                 → producer ck:code-review (dir ck-code-review, mutates=false) | contesters [ck:code-review (ck-code-review), ck:security (ck-security)] | contest: missed bugs, exploitable holes`
 
@@ -91,12 +93,13 @@ const ROUTE_SCHEMA = {
     },
     n_agents: { type: 'number', minimum: 2, maximum: 4, description: 'number of contest agents, 2-3 (hard cap 4)' },
     contest_targets: { type: 'array', items: { type: 'string' }, description: 'what the adversaries must attack' },
+    contest_angles: { type: 'array', items: { type: 'string' }, description: 'one concrete attack angle per contest agent (length = n_agents), ALL DISTINCT. For same-skill investigation intents (debug/research), each is a DISTINCT hypothesis (e.g. "race condition on shared cache", "stale config not reloaded", "off-by-one in pagination"). For different-skill contests, each names that challenger skill\'s lens (e.g. "logic/correctness", "exploitability", "test coverage & regressions").' },
     complexity: { type: 'string', enum: ['low', 'medium', 'high'], description: 'reasoning difficulty of this task' },
     producer_model: { type: 'string', enum: ['opus', 'sonnet', 'haiku'], description: 'model tier for the producer' },
     judge_model: { type: 'string', enum: ['opus', 'sonnet', 'haiku'], description: 'model tier for the judge' },
     contester_models: { type: 'array', items: { type: 'string', enum: ['opus', 'sonnet', 'haiku'] }, description: 'one model tier per contest agent (length = n_agents); DIVERSIFY across tiers for broader adversarial coverage' },
   },
-  required: ['intent', 'producer_skill', 'producer_dir', 'mutates_files', 'deliverable', 'contesters', 'n_agents', 'contest_targets', 'complexity', 'producer_model', 'judge_model', 'contester_models'],
+  required: ['intent', 'producer_skill', 'producer_dir', 'mutates_files', 'deliverable', 'contesters', 'n_agents', 'contest_targets', 'contest_angles', 'complexity', 'producer_model', 'judge_model', 'contester_models'],
 }
 
 phase('Tuyển binh')
@@ -108,7 +111,13 @@ Prompt: ${prompt}
 Routing table:
 ${ROUTING_TABLE}
 
-Return the producer ck: skill (+dir), whether it mutates files, the concrete deliverable, the contester ck: skills (+dirs), how many contest agents (2-3), and the specific contest targets for THIS prompt.
+Return the producer ck: skill (+dir), whether it mutates files, the concrete deliverable, the contester ck: skills (+dirs), how many contest agents, and the specific contest targets for THIS prompt.
+
+N (number of contest agents): follow the row's N. For 'implement' use exactly 3 (one challenger per lens: code-review, security, test). For 'fix', add ck:test as a 3rd contester ONLY when the fix touches logic (else keep 2). For debug/research the diversity comes from the hypotheses, not the skill — keep the single skill but set n=3 (debug) / 2-3 (research).
+
+ALSO produce contest_angles — exactly n_agents concrete attack angles, one per challenger, ALL DISTINCT:
+- Different-skill contests (implement, review, fix): each angle names the lens of that challenger's skill, IN THE SAME ORDER as the contesters list (e.g. contesters [code-review, security, test] → angles ["logic/correctness & broken contracts", "exploitable input/auth/storage holes", "missing tests & regressions"]).
+- Same-skill investigation (debug, research): each angle is a DIFFERENT concrete hypothesis/lead to chase — do NOT leave them generic. For research, make one angle explicitly seek disconfirming evidence.
 
 ALSO auto-assign a MODEL tier per agent based on reasoning difficulty:
 - opus  → hard reasoning: subtle/concurrency bugs, architecture & security decisions, deep root-cause, cross-file impact
@@ -131,7 +140,9 @@ if (!route.contesters || route.contesters.length === 0) {
 const n = Math.max(2, Math.min(nOverride || route.n_agents || 2, 4))
 // Backfill to length n so the returned models align with `agents: n` (the 'inherit' sentinel → safe session model).
 const contesterModels = Array.from({ length: n }, (_, i) => (route.contester_models || [])[i] || 'inherit')
-log(`⚔️ Lanista điểm binh: ${route.intent} (${route.complexity}) → Gladiator ${route.producer_skill} [${route.producer_model || 'inherit'}], ${n} Challengers ${route.contesters.map(c => c.name).join(', ')}, Caesar [${route.judge_model || 'inherit'}]`)
+// One concrete attack angle per challenger; empty string falls back to the generic "distinct angle" instruction in the prompt.
+const contestAngles = Array.from({ length: n }, (_, i) => (route.contest_angles || [])[i] || '')
+log(`⚔️ Lanista điểm binh [vòng ${round}]: ${route.intent} (${route.complexity}) → Gladiator ${route.producer_skill} [${route.producer_model || 'inherit'}], ${n} Challengers ${route.contesters.map(c => c.name).join(', ')}, Caesar [${route.judge_model || 'inherit'}]`)
 
 phase('Ra trận')
 const artifact = await agent(
@@ -216,6 +227,7 @@ Be decisive. A challenger being loud does not make an objection valid — judge 
 
 return {
   prompt,
+  round,
   intent: route.intent,
   complexity: route.complexity,
   producer: route.producer_skill,
@@ -237,5 +249,6 @@ return {
 - **Auto model selection:** the Lanista assigns a model tier per agent (opus/sonnet/haiku) based on task complexity, and diversifies the challengers' models so different tiers catch different faults. Invalid/missing tiers fall back to the inherited session model (safe). The `agent()` `model` option is what makes this work.
 - **Challenger labels keep their weapon:** each challenger is labelled `challenger-<N>-<skill>` (e.g. `challenger-1-code-review`, `challenger-2-test`) — the number tells them apart, the skill suffix shows what each is actually doing.
 - The adversarial structure lives entirely here; every agent still uses the original ck: skills as tools — ck: is never modified.
-- If the Gladiator mutated files (`ck:cook` / `ck:fix`), it ran in an isolated worktree and the branch is returned in the `branch` field. Merge depends on Caesar's verdict: on **ACCEPT** merge as-is (`git merge <branch>`); on **REVISE** apply the required actions on the branch first, then merge; on **REJECT** discard. Clean up afterward with `git worktree remove <path>` (resolve any merge conflicts manually).
+- If the Gladiator mutated files (`ck:cook` / `ck:fix`), it ran in an isolated worktree and only the branch NAME is returned (`branch` field) — the worktree PATH is not, so resolve it at runtime with `git worktree list` (filter by the branch) before any `git worktree remove`. Merge depends on Caesar's verdict: on **ACCEPT** merge as-is (`git merge <branch>`); on **REVISE** apply the required actions first, then merge; on **REJECT** discard (resolve conflicts manually). If `mutatedFiles` is true but `branch` is null (Gladiator dropped the `BRANCH:` footer), recover it via `git worktree list`.
+- **Post-verdict "ending":** after reporting the verdict, follow the closing protocol in `SKILL.md` → "Arena ending (post-verdict next steps)". Engine caveats it relies on: (1) round count = the returned `round` field (parsed from the prompt's `[TÁI ĐẤU vòng N]` tag — the engine is stateless between calls); (2) a follow-up `--arena` prompt MUST anchor the original intent (`[TÁI ĐẤU vòng <N+1> — intent: <intent>] …`) so the Lanista does not re-route to a different (mutating) producer; (3) there is no `--branch` arg — "same branch" is advisory, a mutating re-run may create a NEW branch.
 - Requires the ck: skills the router routes to (cook, ck-code-review, test, ck-plan, ck-predict, ck-scenario, fix, ck-debug, research, ck-security).
