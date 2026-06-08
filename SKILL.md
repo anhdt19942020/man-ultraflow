@@ -8,7 +8,7 @@ keywords: [workflow, parallel, multi-agent, research, review, pipeline, plan, br
 argument-hint: "<template> <args> [--agents N] OR --arena <prompt>"
 metadata:
   author: user
-  version: "4.0.0"
+  version: "4.1.0"
 ---
 
 # Ultraflow — Parallel Agent Workflows

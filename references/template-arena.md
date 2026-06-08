@@ -45,6 +45,11 @@ const useCkSkill = (name, dir) =>
   `Load it first: call the Skill tool with skill "${name}". If the Skill tool is unavailable to you, Read ~/.claude/skills/${dir}/SKILL.md and every reference file it instructs you to load.\n` +
   `Then follow that skill's steps, gates, and output format EXACTLY for the work below.`
 
+// Auto model selection: router assigns a tier per agent; this validates it.
+// Invalid/missing → omit the model option so the agent inherits the session model (safe default).
+const MODELS = ['opus', 'sonnet', 'haiku']
+const modelOpt = (m) => (MODELS.includes(m) ? { model: m } : {})
+
 const ROUTING_TABLE = `
 - implement / code / build / add feature  → producer ck:cook (dir cook, mutates=true) | contesters [ck:code-review (ck-code-review), ck:test (test)] | contest: bugs, regressions, broken contracts, missing tests
 - plan / architect / design / roadmap     → producer ck:plan (dir ck-plan, mutates=false) | contesters [ck:predict (ck-predict)] | contest: false assumptions, missing edge cases, over-engineering, infeasibility
@@ -69,8 +74,12 @@ const ROUTE_SCHEMA = {
     },
     n_agents: { type: 'number', description: 'number of contest agents, 2-3' },
     contest_targets: { type: 'array', items: { type: 'string' }, description: 'what the adversaries must attack' },
+    complexity: { type: 'string', enum: ['low', 'medium', 'high'], description: 'reasoning difficulty of this task' },
+    producer_model: { type: 'string', enum: ['opus', 'sonnet', 'haiku'], description: 'model tier for the producer' },
+    judge_model: { type: 'string', enum: ['opus', 'sonnet', 'haiku'], description: 'model tier for the judge' },
+    contester_models: { type: 'array', items: { type: 'string', enum: ['opus', 'sonnet', 'haiku'] }, description: 'one model tier per contest agent (length = n_agents); DIVERSIFY across tiers for broader adversarial coverage' },
   },
-  required: ['intent', 'producer_skill', 'producer_dir', 'mutates_files', 'deliverable', 'contesters', 'n_agents', 'contest_targets'],
+  required: ['intent', 'producer_skill', 'producer_dir', 'mutates_files', 'deliverable', 'contesters', 'n_agents', 'contest_targets', 'complexity', 'producer_model', 'judge_model', 'contester_models'],
 }
 
 phase('Route')
@@ -82,7 +91,13 @@ Prompt: ${prompt}
 Routing table:
 ${ROUTING_TABLE}
 
-Return the producer ck: skill (+dir), whether it mutates files, the concrete deliverable, the contester ck: skills (+dirs), how many contest agents (2-3), and the specific contest targets for THIS prompt.`,
+Return the producer ck: skill (+dir), whether it mutates files, the concrete deliverable, the contester ck: skills (+dirs), how many contest agents (2-3), and the specific contest targets for THIS prompt.
+
+ALSO auto-assign a MODEL tier per agent based on reasoning difficulty:
+- opus  → hard reasoning: subtle/concurrency bugs, architecture & security decisions, deep root-cause, cross-file impact
+- sonnet → moderate work: standard implementation, routine review, fact-checking, well-scoped tasks
+- haiku → simple/mechanical: lint, formatting, trivial lookups, yes/no checks
+Set complexity, producer_model, judge_model, and contester_models (exactly n_agents entries). DIVERSIFY contester_models across tiers when sensible — different models catch different faults, strengthening the adversarial pass. The judge should usually be opus unless the task is trivial.`,
   { label: 'router', phase: 'Route', schema: ROUTE_SCHEMA }
 )
 
@@ -92,7 +107,8 @@ if (!route) {
 }
 
 const n = Math.max(2, Math.min(nOverride || route.n_agents || 2, 4))
-log(`Intent: ${route.intent} → produce with ${route.producer_skill}, contest with ${route.contesters.map(c => c.name).join(', ')} (${n} agents)`)
+const contesterModels = route.contester_models || []
+log(`Intent: ${route.intent} (${route.complexity}) → produce ${route.producer_skill} [${route.producer_model || 'inherit'}], contest ${route.contesters.map(c => c.name).join(', ')} (${n} agents), judge [${route.judge_model || 'inherit'}]`)
 
 phase('Produce')
 const artifact = await agent(
@@ -103,7 +119,7 @@ Task: ${prompt}
 Produce this deliverable: ${route.deliverable}
 
 Report exactly what you produced. ${route.mutates_files ? 'Commit your changes with a conventional commit message and report the branch + the file:line changes so reviewers can inspect them.' : 'Output the full artifact so reviewers can scrutinize it.'}`,
-  { label: 'producer', phase: 'Produce', ...(route.mutates_files ? { isolation: 'worktree' } : {}) }
+  { label: 'producer', phase: 'Produce', ...modelOpt(route.producer_model), ...(route.mutates_files ? { isolation: 'worktree' } : {}) }
 )
 
 phase('Contest')
@@ -129,7 +145,7 @@ Rules:
 - If you genuinely find nothing in your area, say so explicitly (do not invent issues).
 
 Report: ## Objections (rated, with evidence) / ## What holds up / ## Verdict (artifact is: SOUND / NEEDS-REVISION / REJECT)`,
-        { label: `contester-${i + 1}-${adv.name.replace('ck:', '')}`, phase: 'Contest' }
+        { label: `contester-${i + 1}-${adv.name.replace('ck:', '')}`, phase: 'Contest', ...modelOpt(contesterModels[i]) }
       )
   })
 )
@@ -156,14 +172,18 @@ Rule:
 4. **One-line bottom line**
 
 Be decisive. A contester being loud does not make an objection valid — judge on evidence.`,
-  { label: 'judge', phase: 'Judge' }
+  { label: 'judge', phase: 'Judge', ...modelOpt(route.judge_model) }
 )
 
 return {
   prompt,
   intent: route.intent,
+  complexity: route.complexity,
   producer: route.producer_skill,
+  producerModel: route.producer_model,
   contesters: route.contesters.map(c => c.name),
+  contesterModels,
+  judgeModel: route.judge_model,
   agents: n,
   mutatedFiles: route.mutates_files,
   verdict,
@@ -174,6 +194,7 @@ return {
 
 - **Trigger:** `/man:ultraflow --arena "<prompt>"` (or `arena <prompt>`). The router decides everything else.
 - **`--agents N`** overrides the router's agent count (clamped 2-4).
+- **Auto model selection:** the router assigns a model tier per agent (opus/sonnet/haiku) based on task complexity, and diversifies the contesters' models so different tiers catch different faults. Invalid/missing tiers fall back to the inherited session model (safe). The `agent()` `model` option is what makes this work.
 - The adversarial structure lives entirely here; every agent still uses the original ck: skills as tools — ck: is never modified.
 - If the producer mutated files (`ck:cook` / `ck:fix`), it ran in an isolated worktree. After a REVISE/ACCEPT verdict, merge the branch: `git worktree list` → `git merge <branch>`.
 - Requires the ck: skills the router routes to (cook, ck-code-review, test, ck-plan, ck-predict, fix, ck-debug, research, ck-security).
