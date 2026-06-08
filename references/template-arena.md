@@ -1,17 +1,26 @@
 # Ultraflow — Arena Template (smart adversarial dispatcher)
 
-The orchestration layer adds the **adversarial structure**; ck: skills stay untouched and are used only as per-agent tools. A router agent reads the prompt and auto-decides: which ck: skill **produces** the work, which ck: skill(s) **contest** it, how many agents, and what to attack. Then: PRODUCE → CONTEST → JUDGE.
+The orchestration layer adds the **adversarial structure**, themed as a Roman arena; ck: skills stay untouched and are used only as per-agent tools. The **Lanista** (router) reads the prompt and auto-decides: which ck: skill the **Gladiator** (producer) uses to make the work, which ck: skill(s) the **Challengers** (contesters) use to attack it, how many, and what to target. Then **Caesar** (judge) rules. Flow: Tuyển binh → Ra trận → Giao chiến → Phán quyết.
 
-This is the meta-entry point: you give a plain prompt, the router picks the right ck: pairing for you.
+This is the meta-entry point: you give a plain prompt, the Lanista picks the right ck: pairing for you.
+
+### Roles (chủ đề Đấu sĩ La Mã)
+
+| Code role | Tên đấu trường | Phase | Vai trò |
+|---|---|---|---|
+| router | **Lanista** | Tuyển binh | Chọn đấu sĩ + kẻ khiêu chiến + số agent + mục tiêu công kích |
+| producer | **Gladiator** | Ra trận | Tạo sản phẩm (chạy ck: skill được chọn) |
+| contester | **Challenger** (`challenger-N-<skill>`) | Giao chiến | Công kích sản phẩm; nhãn giữ skill thật (vd `challenger-1-code-review`, `challenger-2-test`) |
+| judge | **Caesar** | Phán quyết | Phán xử 👍 ÂN XÁ / ✊ TÁI ĐẤU / 👎 KHAI TỬ (ACCEPT/REVISE/REJECT) |
 
 ## Args
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `prompt` | string | required | Any task/question/decision in natural language |
-| `n` | number | optional | Override the number of contest agents (else router decides, 2-3; clamped to 2-4) |
+| `n` | number | optional | Override the number of contest agents (else the Lanista decides, 2-3; clamped to 2-4) |
 
-## Routing table (the router follows this)
+## Routing table (the Lanista follows this)
 
 | Prompt intent | PRODUCE (ck:) | CONTEST (ck:) | N | Contest what |
 |---|---|---|---|---|
@@ -28,12 +37,12 @@ This is the meta-entry point: you give a plain prompt, the router picks the righ
 ```javascript
 export const meta = {
   name: 'ultraflow-arena',
-  description: 'Router auto-picks ck: skills, then PRODUCE → adversarial CONTEST → JUDGE',
+  description: 'Lanista routes → Gladiator produces → Challengers contest → Caesar judges (adversarial arena)',
   phases: [
-    { title: 'Route', detail: 'One router agent picks producer ck:, contester ck:, N agents, contest targets' },
-    { title: 'Produce', detail: 'Producer agent runs the chosen ck: skill to create the artifact' },
-    { title: 'Contest', detail: 'N adversaries each run a ck: skill to attack the artifact' },
-    { title: 'Judge', detail: 'One judge rules: survives / needs revision, with prioritized actions' },
+    { title: 'Tuyển binh', detail: 'Lanista đọc prompt → chọn Gladiator (producer), Challengers (contesters), số agent + mục tiêu công kích' },
+    { title: 'Ra trận', detail: 'Gladiator chạy ck: skill được chọn để tạo sản phẩm' },
+    { title: 'Giao chiến', detail: 'N Challengers, mỗi người chạy một ck: skill để công kích sản phẩm' },
+    { title: 'Phán quyết', detail: 'Caesar phân xử: ÂN XÁ (ACCEPT) / TÁI ĐẤU (REVISE) / KHAI TỬ (REJECT) + việc cần làm' },
   ],
 }
 
@@ -44,7 +53,7 @@ const nOverride = A.n
 
 // Abort early on an empty prompt instead of running a full PRODUCE→CONTEST→JUDGE cycle on a placeholder.
 if (!A.prompt) {
-  log('No prompt provided (args carried no prompt) — aborting.')
+  log('Đấu trường trống — args không mang prompt. Hủy trận.')
   return { error: 'empty-prompt', hint: 'Re-run: /man:ultraflow --arena "<your task>"' }
 }
 
@@ -90,9 +99,9 @@ const ROUTE_SCHEMA = {
   required: ['intent', 'producer_skill', 'producer_dir', 'mutates_files', 'deliverable', 'contesters', 'n_agents', 'contest_targets', 'complexity', 'producer_model', 'judge_model', 'contester_models'],
 }
 
-phase('Route')
+phase('Tuyển binh')
 const route = await agent(
-  `You are the ARENA router. Read the prompt and decide the adversarial setup using the routing table. Pick the SINGLE best-matching row.
+  `You are the LANISTA (arena master). Read the prompt and decide the adversarial setup using the routing table. Pick the SINGLE best-matching row.
 
 Prompt: ${prompt}
 
@@ -106,38 +115,38 @@ ALSO auto-assign a MODEL tier per agent based on reasoning difficulty:
 - sonnet → moderate work: standard implementation, routine review, fact-checking, well-scoped tasks
 - haiku → simple/mechanical: lint, formatting, trivial lookups, yes/no checks
 Set complexity, producer_model, judge_model, and contester_models (exactly n_agents entries). DIVERSIFY contester_models across tiers when sensible — different models catch different faults, strengthening the adversarial pass. The judge should usually be opus unless the task is trivial.`,
-  { label: 'router', phase: 'Route', schema: ROUTE_SCHEMA }
+  { label: 'lanista', phase: 'Tuyển binh', schema: ROUTE_SCHEMA }
 )
 
 if (!route) {
-  log('Router failed — aborting')
+  log('Lanista thất bại — hủy trận')
   return { prompt, error: 'router failed' }
 }
 
 if (!route.contesters || route.contesters.length === 0) {
-  log('Router returned no contesters — aborting')
+  log('Lanista không cử được Challenger nào — hủy trận')
   return { prompt, intent: route.intent, error: 'no contesters' }
 }
 
 const n = Math.max(2, Math.min(nOverride || route.n_agents || 2, 4))
 // Backfill to length n so the returned models align with `agents: n` (the 'inherit' sentinel → safe session model).
 const contesterModels = Array.from({ length: n }, (_, i) => (route.contester_models || [])[i] || 'inherit')
-log(`Intent: ${route.intent} (${route.complexity}) → produce ${route.producer_skill} [${route.producer_model || 'inherit'}], contest ${route.contesters.map(c => c.name).join(', ')} (${n} agents), judge [${route.judge_model || 'inherit'}]`)
+log(`⚔️ Lanista điểm binh: ${route.intent} (${route.complexity}) → Gladiator ${route.producer_skill} [${route.producer_model || 'inherit'}], ${n} Challengers ${route.contesters.map(c => c.name).join(', ')}, Caesar [${route.judge_model || 'inherit'}]`)
 
-phase('Produce')
+phase('Ra trận')
 const artifact = await agent(
-  `${useCkSkill(route.producer_skill, route.producer_dir)}
+  `You are the GLADIATOR stepping into the arena. ${useCkSkill(route.producer_skill, route.producer_dir)}
 
 Task: ${prompt}
 
 Produce this deliverable: ${route.deliverable}
 
 Report exactly what you produced. ${route.mutates_files ? 'Commit your changes with a conventional commit message, report the file:line changes so reviewers can inspect them, and end your report with the branch name on its own final line in the EXACT form `BRANCH: <branch-name>`.' : 'Output the full artifact so reviewers can scrutinize it.'}`,
-  { label: 'producer', phase: 'Produce', ...modelOpt(route.producer_model), ...(route.mutates_files ? { isolation: 'worktree' } : {}) }
+  { label: 'gladiator', phase: 'Ra trận', ...modelOpt(route.producer_model), ...(route.mutates_files ? { isolation: 'worktree' } : {}) }
 )
 
 if (!artifact) {
-  log('Producer failed — aborting (nothing to contest)')
+  log('Gladiator gục ngã — không tạo được sản phẩm. Hủy trận (không có gì để công kích).')
   return { prompt, intent: route.intent, producer: route.producer_skill, error: 'producer failed' }
 }
 
@@ -145,7 +154,7 @@ if (!artifact) {
 const branchMatch = route.mutates_files && typeof artifact === 'string' ? artifact.match(/BRANCH:\s*(\S+)/) : null
 const branch = branchMatch ? branchMatch[1] : null
 
-phase('Contest')
+phase('Giao chiến')
 const critiques = await parallel(
   Array.from({ length: n }, (_, i) => {
     const adv = route.contesters[i % route.contesters.length]
@@ -153,7 +162,7 @@ const critiques = await parallel(
       agent(
         `${useCkSkill(adv.name, adv.dir)}
 
-You are contester-${i + 1} of ${n} in an adversarial arena. Your job: ATTACK the artifact below produced for this task — assume it is flawed until proven otherwise. Use your ${adv.name} skill as the tool to find concrete faults. When other contesters share your skill, attack from an angle distinct to your index (contester-${i + 1}) — breadth across contesters beats duplicated objections.
+You are CHALLENGER #${i + 1} of ${n}, wielding the ${adv.name} skill as your weapon. Your job: ATTACK the artifact below produced for this task — assume it is flawed until proven otherwise. Use your ${adv.name} skill as the tool to find concrete faults. When other challengers share your weapon, attack from an angle distinct to your index (challenger-${i + 1}) — breadth across challengers beats duplicated objections.
 
 Original task: ${prompt}
 
@@ -168,41 +177,41 @@ Rules:
 - If you genuinely find nothing in your area, say so explicitly (do not invent issues).
 
 Report: ## Objections (rated, with evidence) / ## What holds up / ## Verdict (artifact is: SOUND / NEEDS-REVISION / REJECT)`,
-        { label: `contester-${i + 1}-${adv.name.replace('ck:', '')}`, phase: 'Contest', ...modelOpt(contesterModels[i]) }
+        { label: `challenger-${i + 1}-${adv.name.replace('ck:', '')}`, phase: 'Giao chiến', ...modelOpt(contesterModels[i]) }
       )
   })
 )
 
 const valid = critiques.filter(Boolean)
-log(`${valid.length}/${n} contesters reported`)
+log(`${valid.length}/${n} Challengers đã giao chiến`)
 
 if (valid.length === 0) {
-  log('All contesters failed — aborting before judge (no objections to weigh)')
+  log('Toàn bộ Challenger gục ngã — hủy trước khi Caesar phán quyết (không có công kích nào để cân nhắc)')
   return { prompt, intent: route.intent, producer: route.producer_skill, artifact, branch, error: 'all contesters failed' }
 }
 
-phase('Judge')
+phase('Phán quyết')
 const verdict = await agent(
-  `You are the impartial JUDGE of an adversarial arena. Weigh the produced artifact against the contesters' objections and rule.
+  `You are CAESAR, the impartial judge presiding over the arena. Weigh the gladiator's artifact against the challengers' objections and rule.
 
-Contest coverage: ${valid.length} of ${n} contesters reported — weight partial rounds accordingly (fewer reports means thinner adversarial coverage, NOT implicit approval).
+Contest coverage: ${valid.length} of ${n} challengers reported — weight partial rounds accordingly (fewer reports means thinner adversarial coverage, NOT implicit approval).
 
 Original task: ${prompt}
 
 Artifact (by ${route.producer_skill}):
 ${artifact}
 
-Contester reports:
-${valid.map((c, i) => `=== Contester ${i + 1} ===\n${c}`).join('\n\n')}
+Challenger reports:
+${valid.map((c, i) => `=== Challenger ${i + 1} ===\n${c}`).join('\n\n')}
 
 Rule:
-1. **Verdict**: ACCEPT (ship as-is) / REVISE (fix listed items first) / REJECT (approach is wrong)
+1. **Verdict** (👑 the thumb): ACCEPT (👍 ÂN XÁ — ship as-is) / REVISE (✊ TÁI ĐẤU — fix listed items first) / REJECT (👎 KHAI TỬ — approach is wrong). Output the canonical token ACCEPT/REVISE/REJECT so downstream tooling can parse it.
 2. **Upheld objections**: which BLOCKER/MAJOR objections are real (dismiss any that are wrong or non-issues — say why)
 3. **Required actions** (numbered, prioritized): exactly what to fix, where, how
 4. **One-line bottom line**
 
-Be decisive. A contester being loud does not make an objection valid — judge on evidence.`,
-  { label: 'judge', phase: 'Judge', ...modelOpt(route.judge_model) }
+Be decisive. A challenger being loud does not make an objection valid — judge on evidence.`,
+  { label: 'caesar', phase: 'Phán quyết', ...modelOpt(route.judge_model) }
 )
 
 return {
@@ -223,9 +232,10 @@ return {
 
 ## Notes
 
-- **Trigger:** `/man:ultraflow --arena "<prompt>"` (or `arena <prompt>`). The router decides everything else.
-- **`--agents N`** overrides the router's agent count (clamped 2-4).
-- **Auto model selection:** the router assigns a model tier per agent (opus/sonnet/haiku) based on task complexity, and diversifies the contesters' models so different tiers catch different faults. Invalid/missing tiers fall back to the inherited session model (safe). The `agent()` `model` option is what makes this work.
+- **Trigger:** `/man:ultraflow --arena "<prompt>"` (or `arena <prompt>`). The Lanista decides everything else.
+- **`--agents N`** overrides the Lanista's challenger count (clamped 2-4).
+- **Auto model selection:** the Lanista assigns a model tier per agent (opus/sonnet/haiku) based on task complexity, and diversifies the challengers' models so different tiers catch different faults. Invalid/missing tiers fall back to the inherited session model (safe). The `agent()` `model` option is what makes this work.
+- **Challenger labels keep their weapon:** each challenger is labelled `challenger-<N>-<skill>` (e.g. `challenger-1-code-review`, `challenger-2-test`) — the number tells them apart, the skill suffix shows what each is actually doing.
 - The adversarial structure lives entirely here; every agent still uses the original ck: skills as tools — ck: is never modified.
-- If the producer mutated files (`ck:cook` / `ck:fix`), it ran in an isolated worktree and the branch is returned in the `branch` field. Merge depends on the verdict: on **ACCEPT** merge as-is (`git merge <branch>`); on **REVISE** apply the required actions on the branch first, then merge; on **REJECT** discard. Clean up afterward with `git worktree remove <path>` (resolve any merge conflicts manually).
+- If the Gladiator mutated files (`ck:cook` / `ck:fix`), it ran in an isolated worktree and the branch is returned in the `branch` field. Merge depends on Caesar's verdict: on **ACCEPT** merge as-is (`git merge <branch>`); on **REVISE** apply the required actions on the branch first, then merge; on **REJECT** discard. Clean up afterward with `git worktree remove <path>` (resolve any merge conflicts manually).
 - Requires the ck: skills the router routes to (cook, ck-code-review, test, ck-plan, ck-predict, ck-scenario, fix, ck-debug, research, ck-security).
