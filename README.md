@@ -57,11 +57,11 @@ The templates are **orchestrators only** — they do not reimplement workflow lo
 |---|---|---|
 | `scout` | `ck:scout` | `scout` |
 | `brainstorm` | `ck:brainstorm` | `brainstorm` |
-| `plan` | `research` + `ck:plan` | `research`, `ck-plan` |
+| `plan` | `ck:research` + `ck:plan` | `research`, `ck-plan` |
 | `cook` | `ck:scout` + `ck:plan` + `ck:cook` + `ck:test` | `scout`, `ck-plan`, `cook`, `test` |
 | `fix` | `ck:fix` | `fix` |
 | `debug` | `ck:debug` | `ck-debug` |
-| `research` | `research` | `research` |
+| `research` | `ck:research` | `research` |
 | `review` | `ck:code-review` | `ck-code-review` |
 
 Templates that mutate files in parallel (`cook`, `fix`) run each agent in an **isolated git worktree** so there are no conflicts. After completion, merge the winning branch:

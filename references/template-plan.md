@@ -47,7 +47,7 @@ const reports = mode === 'fast'
   : await parallel(
       RESEARCH_ANGLES.slice(0, n).map((angle, i) => () =>
         agent(
-          `${useCkSkill('research', 'research')}\n\nYour assigned research angle: ${angle}\n\nReturn a structured, evidence-based report (executive summary, key findings, recommendations, open questions).`,
+          `${useCkSkill('ck:research', 'research')}\n\nYour assigned research angle: ${angle}\n\nReturn a structured, evidence-based report (executive summary, key findings, recommendations, open questions).`,
           { label: `researcher-${i + 1}`, phase: 'Research' }
         )
       )

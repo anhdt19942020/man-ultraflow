@@ -23,11 +23,11 @@ Each template is **only an orchestrator**. The actual workflow logic is NOT reim
 |---|---|---|
 | `scout` | `ck:scout` | `scout` |
 | `brainstorm` | `ck:brainstorm` | `brainstorm` |
-| `plan` | `research` + `ck:plan` | `research`, `ck-plan` |
+| `plan` | `ck:research` + `ck:plan` | `research`, `ck-plan` |
 | `cook` | `ck:scout` + `ck:plan` + `ck:cook` + `ck:test` | `scout`, `ck-plan`, `cook`, `test` |
 | `fix` | `ck:fix` | `fix` |
 | `debug` | `ck:debug` | `ck-debug` |
-| `research` | `research` | `research` |
+| `research` | `ck:research` | `research` |
 | `review` | `ck:code-review` | `ck-code-review` |
 
 **Dependency:** these templates require the listed ck: skills to be installed (ClaudeKit). If a ck: skill is missing, that template degrades to whatever the agent can do without it.

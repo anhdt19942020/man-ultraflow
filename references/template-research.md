@@ -42,7 +42,7 @@ const ANGLES = [
 phase('Research')
 const reports = await parallel(ANGLES.map((angle, i) => () =>
   agent(
-    `${useCkSkill('research', 'research')}\n\nYou are researcher-${i + 1} in a parallel team. Your assigned angle: ${angle}\n\nResearch thoroughly and evidence-based. Structure: 1) Executive Summary, 2) Key Findings (with evidence), 3) Concrete Examples/Snippets, 4) Recommendations, 5) Unresolved Questions.\n\nTopic context: ${topic}`,
+    `${useCkSkill('ck:research', 'research')}\n\nYou are researcher-${i + 1} in a parallel team. Your assigned angle: ${angle}\n\nResearch thoroughly and evidence-based. Structure: 1) Executive Summary, 2) Key Findings (with evidence), 3) Concrete Examples/Snippets, 4) Recommendations, 5) Unresolved Questions.\n\nTopic context: ${topic}`,
     { label: `researcher-${i + 1}`, phase: 'Research' }
   )
 ))
@@ -52,7 +52,7 @@ log(`${valid.length}/${n} researchers completed`)
 
 phase('Synthesize')
 const synthesis = await agent(
-  `${useCkSkill('research', 'research')}
+  `${useCkSkill('ck:research', 'research')}
 
 Synthesize these ${valid.length} research reports on: ${topic}
 
