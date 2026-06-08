@@ -16,12 +16,12 @@ This is the meta-entry point: you give a plain prompt, the router picks the righ
 | Prompt intent | PRODUCE (ck:) | CONTEST (ck:) | N | Contest what |
 |---|---|---|---|---|
 | implement / code / build / add feature | `ck:cook` (mutates) | `ck:code-review` + `ck:test` | 2-3 | bugs, regressions, broken contracts, missing tests |
-| plan / architect / design / roadmap | `ck:plan` | `ck:predict` | 2-3 | false assumptions, missing edge cases, over-engineering, infeasibility |
+| plan / architect / design / roadmap | `ck:plan` | `ck:predict` + `ck:scenario` | 2-3 | false assumptions, missing edge cases, over-engineering, infeasibility |
 | fix bug / error / failing test | `ck:fix` (mutates) | `ck:debug` + `ck:code-review` | 2-3 | wrong root cause, regressions |
-| debug / find root cause / why | `ck:debug` | additional `ck:debug` investigators | 3 | competing hypotheses |
-| research / find info / compare | `ck:research` | research verifiers | 2-3 | wrong/unsourced claims, missing data |
+| debug / find root cause / why | `ck:debug` | additional `ck:debug` investigators (distinct hypothesis each) | 3 | competing hypotheses |
+| research / find info / compare | `ck:research` | research verifiers (distinct angle each) | 2-3 | wrong/unsourced claims, missing data |
 | security / audit / vulnerability | `ck:security` | red-team attackers (`ck:security`) | 3 | exploitable holes |
-| review code | `ck:code-review` | `ck:code-review` other lenses | 3 | missed bugs |
+| review code | `ck:code-review` | `ck:code-review` + `ck:security` (if input/auth/storage) | 3 | missed bugs, exploitable holes |
 
 ## Workflow Script
 
@@ -60,12 +60,12 @@ const modelOpt = (m) => (MODELS.includes(m) ? { model: m } : {})
 
 const ROUTING_TABLE = `
 - implement / code / build / add feature  → producer ck:cook (dir cook, mutates=true) | contesters [ck:code-review (ck-code-review), ck:test (test)] | contest: bugs, regressions, broken contracts, missing tests
-- plan / architect / design / roadmap     → producer ck:plan (dir ck-plan, mutates=false) | contesters [ck:predict (ck-predict)] | contest: false assumptions, missing edge cases, over-engineering, infeasibility
+- plan / architect / design / roadmap     → producer ck:plan (dir ck-plan, mutates=false) | contesters [ck:predict (ck-predict), ck:scenario (ck-scenario)] | contest: false assumptions, missing edge cases, over-engineering, infeasibility
 - fix bug / error / failing test          → producer ck:fix (dir fix, mutates=true) | contesters [ck:debug (ck-debug), ck:code-review (ck-code-review)] | contest: wrong root cause, regressions
-- debug / find root cause / why           → producer ck:debug (dir ck-debug, mutates=false) | contesters [ck:debug (ck-debug)] | contest: competing hypotheses
-- research / find info / compare          → producer ck:research (dir research, mutates=false) | contesters [ck:research (research)] | contest: wrong/unsourced claims, missing data
+- debug / find root cause / why           → producer ck:debug (dir ck-debug, mutates=false) | contesters [ck:debug (ck-debug)] | contest: competing hypotheses — each investigator MUST pursue a DISTINCT hypothesis
+- research / find info / compare          → producer ck:research (dir research, mutates=false) | contesters [ck:research (research)] | contest: wrong/unsourced claims, missing data — each verifier MUST take a DISTINCT angle (one seeks disconfirming sources)
 - security / audit / vulnerability        → producer ck:security (dir ck-security, mutates=false) | contesters [ck:security (ck-security)] | contest: exploitable holes
-- review code / review PR                 → producer ck:code-review (dir ck-code-review, mutates=false) | contesters [ck:code-review (ck-code-review)] | contest: missed bugs`
+- review code / review PR                 → producer ck:code-review (dir ck-code-review, mutates=false) | contesters [ck:code-review (ck-code-review), ck:security (ck-security)] | contest: missed bugs, exploitable holes`
 
 const ROUTE_SCHEMA = {
   type: 'object',
@@ -153,7 +153,7 @@ const critiques = await parallel(
       agent(
         `${useCkSkill(adv.name, adv.dir)}
 
-You are contester-${i + 1} in an adversarial arena. Your job: ATTACK the artifact below produced for this task — assume it is flawed until proven otherwise. Use your ${adv.name} skill as the tool to find concrete faults.
+You are contester-${i + 1} of ${n} in an adversarial arena. Your job: ATTACK the artifact below produced for this task — assume it is flawed until proven otherwise. Use your ${adv.name} skill as the tool to find concrete faults. When other contesters share your skill, attack from an angle distinct to your index (contester-${i + 1}) — breadth across contesters beats duplicated objections.
 
 Original task: ${prompt}
 
@@ -228,4 +228,4 @@ return {
 - **Auto model selection:** the router assigns a model tier per agent (opus/sonnet/haiku) based on task complexity, and diversifies the contesters' models so different tiers catch different faults. Invalid/missing tiers fall back to the inherited session model (safe). The `agent()` `model` option is what makes this work.
 - The adversarial structure lives entirely here; every agent still uses the original ck: skills as tools — ck: is never modified.
 - If the producer mutated files (`ck:cook` / `ck:fix`), it ran in an isolated worktree and the branch is returned in the `branch` field. Merge depends on the verdict: on **ACCEPT** merge as-is (`git merge <branch>`); on **REVISE** apply the required actions on the branch first, then merge; on **REJECT** discard. Clean up afterward with `git worktree remove <path>` (resolve any merge conflicts manually).
-- Requires the ck: skills the router routes to (cook, ck-code-review, test, ck-plan, ck-predict, fix, ck-debug, research, ck-security).
+- Requires the ck: skills the router routes to (cook, ck-code-review, test, ck-plan, ck-predict, ck-scenario, fix, ck-debug, research, ck-security).
