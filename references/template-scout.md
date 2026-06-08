@@ -23,8 +23,16 @@ export const meta = {
   ],
 }
 
-const target = (args && args.target) || 'the given target'
-const n = (args && args.n) || 3
+// args may arrive as an object OR a JSON string (harness-dependent) — normalize both.
+const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args || {}) } catch (e) { return {} } })()
+const target = A.target || 'the given target'
+const n = A.n || 3
+
+// Abort early on an empty target instead of running scouts on a placeholder.
+if (!A.target) {
+  log('No target provided (args carried no target) — aborting.')
+  return { error: 'empty-input', hint: 'Re-run: /man:ultraflow --scout "<target>"' }
+}
 
 const useCkSkill = (name, dir) =>
   `Use the ORIGINAL ${name} skill as the single source of truth — do NOT invent a different process.\n` +
@@ -57,6 +65,12 @@ Return file:line citations following ck:scout's output discipline. Be token-effi
 const valid = results.filter(Boolean)
 log(`${valid.length}/${n} scout dimensions complete`)
 
+// Abort before merge if every scout agent failed (nothing to consolidate).
+if (valid.length === 0) {
+  log('All scout agents failed — aborting before merge')
+  return { target, dimensions: 0, error: 'all scouts failed' }
+}
+
 phase('Merge')
 const report = await agent(
   `Merge these ${valid.length} ck:scout reports into one context map for: ${target}
@@ -72,6 +86,12 @@ Produce a structured, deduplicated context map:
 ## Suggested Entrypoints (top 3 files to start, in order, with reason)`,
   { label: 'merger', phase: 'Merge' }
 )
+
+// Guard: merger returned nothing — report the partial results rather than silently returning null.
+if (!report) {
+  log('Merger agent returned nothing — returning raw scout outputs')
+  return { target, dimensions: valid.length, report: valid.join('\n\n'), error: 'merger failed' }
+}
 
 return { target, dimensions: valid.length, report }
 ```

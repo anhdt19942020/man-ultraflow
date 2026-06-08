@@ -24,8 +24,16 @@ export const meta = {
   ],
 }
 
-const issue = (args && args.issue) || 'the given issue'
-const n = (args && args.n) || 3
+// args may arrive as an object OR a JSON string (harness-dependent) — normalize both.
+const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args || {}) } catch (e) { return {} } })()
+const issue = A.issue || 'the given issue'
+const n = A.n || 3
+
+// Abort early on an empty issue instead of running diagnosis on a placeholder.
+if (!A.issue) {
+  log('No issue provided (args carried no issue) — aborting.')
+  return { error: 'empty-input', hint: 'Re-run: /man:ultraflow --fix "<issue description>"' }
+}
 
 const useCkSkill = (name, dir) =>
   `Use the ORIGINAL ${name} skill as the single source of truth — do NOT invent a different process.\n` +
@@ -54,8 +62,14 @@ Return: the root cause, affected files (path), exactly ${n} distinct fix approac
   { label: 'diagnoser', phase: 'Diagnose', schema: DIAGNOSIS_SCHEMA }
 )
 
-const approaches = (diagnosis && diagnosis.fix_approaches) || Array.from({ length: n }, (_, i) => `fix approach ${i + 1}`)
-log(`Root cause: ${diagnosis && diagnosis.root_cause} — spawning ${Math.min(n, approaches.length)} fix attempts`)
+// Guard: diagnoser returned nothing — cannot proceed without root cause.
+if (!diagnosis) {
+  log('Diagnoser agent returned nothing — aborting before fix attempts')
+  return { issue, error: 'diagnoser failed' }
+}
+
+const approaches = diagnosis.fix_approaches || Array.from({ length: n }, (_, i) => `fix approach ${i + 1}`)
+log(`Root cause: ${diagnosis.root_cause} — spawning ${Math.min(n, approaches.length)} fix attempts`)
 
 phase('Fix')
 const fixes = await parallel(
@@ -64,13 +78,13 @@ const fixes = await parallel(
       `${useCkSkill('ck:fix', 'fix')}
 
 The diagnosis is already done (reuse it — do NOT re-diagnose):
-- Root cause: ${diagnosis && diagnosis.root_cause}
-- Affected files: ${(diagnosis && diagnosis.affected_files || []).join(', ')}
+- Root cause: ${diagnosis.root_cause}
+- Affected files: ${(diagnosis.affected_files || []).join(', ')}
 
 Implement the fix for: ${issue}
 Use THIS approach (approach ${i + 1}): ${approach}
 
-Follow ck:fix's implementation + verification discipline. Fix the root cause, keep the change minimal, preserve public contracts. Commit with a conventional message. Report what changed (file:line), why it fixes the root cause, and any risks.`,
+Follow ck:fix's implementation + verification discipline. Fix the root cause, keep the change minimal, preserve public contracts. Commit with a conventional message. Report what changed (file:line), why it fixes the root cause, and any risks. End your report with the branch name on its own final line in the EXACT form \`BRANCH: <branch-name>\`.`,
       { label: `fix-${i + 1}`, phase: 'Fix', isolation: 'worktree' }
     ).then(result => ({ approach, result, index: i + 1 }))
   )
@@ -79,11 +93,23 @@ Follow ck:fix's implementation + verification discipline. Fix the root cause, ke
 const done = fixes.filter(Boolean)
 log(`${done.length}/${n} fix attempts completed`)
 
+// Collect worktree branch from each fix attempt's BRANCH: <name> footer line.
+const branches = done
+  .map(f => (typeof f.result === 'string' ? f.result.match(/BRANCH:\s*(\S+)/) : null))
+  .filter(Boolean)
+  .map(m => m[1])
+
+// Abort before verify if every fix attempt failed (nothing to evaluate).
+if (done.length === 0) {
+  log('All fix attempts failed — aborting before verify')
+  return { issue, diagnosis, attempts: 0, branches, error: 'all fix attempts failed' }
+}
+
 phase('Verify')
 const verification = await agent(
   `Select the best fix for: ${issue}
 
-Root cause: ${diagnosis && diagnosis.root_cause}
+Root cause: ${diagnosis.root_cause}
 
 Attempts:
 ${done.map(f => `=== Fix ${f.index} (${f.approach}) ===\n${f.result}`).join('\n\n')}
@@ -92,12 +118,12 @@ Evaluate each (addresses root cause? regressions? minimal? contracts preserved?)
   { label: 'verifier', phase: 'Verify' }
 )
 
-return { issue, diagnosis, attempts: done.length, verification }
+return { issue, diagnosis, attempts: done.length, branches, verification }
 ```
 
 ## Notes
 
 - Diagnosis runs ck:fix once (root cause is shared); the N attempts skip re-diagnosis and only differ in approach.
-- `isolation: 'worktree'` keeps the competing fixes on separate branches — no conflicts. After completion: `git worktree list`, then merge the winning branch.
+- `isolation: 'worktree'` keeps the competing fixes on separate branches — no conflicts. Each fix attempt reports `BRANCH: <name>` and the returned `branches` array lists them all. After verification: merge the winning branch (`git merge <branch>`) then discard the others (`git worktree remove <path>`). The verifier's output names the winning branch explicitly.
 - Requires `ck:fix` installed (`~/.claude/skills/fix`).
 - Default `n=3`; `n=2` for trivial bugs, `n=4` for systemic issues.

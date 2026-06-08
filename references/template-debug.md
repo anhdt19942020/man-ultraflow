@@ -24,8 +24,16 @@ export const meta = {
   ],
 }
 
-const issue = (args && args.issue) || 'the reported issue'
-const n = (args && args.n) || 3
+// args may arrive as an object OR a JSON string (harness-dependent) — normalize both.
+const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args || {}) } catch (e) { return {} } })()
+const issue = A.issue || 'the reported issue'
+const n = A.n || 3
+
+// Abort early on an empty issue instead of running debug on a placeholder.
+if (!A.issue) {
+  log('No issue provided (args carried no issue) — aborting.')
+  return { error: 'empty-input', hint: 'Re-run: /man:ultraflow --debug "<issue description>"' }
+}
 
 const useCkSkill = (name, dir) =>
   `Use the ORIGINAL ${name} skill as the single source of truth — do NOT invent a different process.\n` +
@@ -45,7 +53,20 @@ Return a numbered list, each one line:
   { label: 'hypothesizer', phase: 'Hypothesize' }
 )
 
+// Guard: hypothesizer returned nothing — cannot proceed without hypotheses.
+if (!hypotheses) {
+  log('Hypothesizer agent returned nothing — aborting before investigation')
+  return { issue, error: 'hypothesizer failed' }
+}
+
 const hypothesisList = hypotheses.split('\n').filter(l => /^\d+\./.test(l.trim())).slice(0, n)
+
+// Guard: no parseable numbered hypotheses — nothing to investigate.
+if (hypothesisList.length === 0) {
+  log('No numbered hypotheses found in hypothesizer output — aborting')
+  return { issue, error: 'no hypotheses parsed', raw: hypotheses }
+}
+
 log(`${hypothesisList.length} hypotheses — spawning investigators`)
 
 phase('Investigate')
@@ -78,6 +99,12 @@ Report: ## Hypothesis / ## Evidence FOR / ## Evidence AGAINST / ## Challenges to
 const valid = investigations.filter(Boolean)
 log(`${valid.length}/${n} investigators completed`)
 
+// Abort before convergence if every investigator failed (nothing to synthesize).
+if (valid.length === 0) {
+  log('All investigators failed — aborting before convergence')
+  return { issue, hypothesesTested: hypothesisList.length, investigatorsCompleted: 0, error: 'all investigators failed' }
+}
+
 phase('Converge')
 const rootCause = await agent(
   `${useCkSkill('ck:debug', 'ck-debug')}
@@ -95,6 +122,12 @@ ${valid.map((r, i) => `=== Investigator ${i + 1} ===\n${r}`).join('\n\n')}
 Report: ## Root Cause / ## Evidence Chain (file:line) / ## Disproven Theories / ## Recommended Fix / ## Verification Steps`,
   { label: 'root-cause-synthesizer', phase: 'Converge' }
 )
+
+// Guard: synthesizer returned nothing — surface raw investigation reports rather than silently returning null.
+if (!rootCause) {
+  log('Root-cause synthesizer returned nothing — returning raw investigation outputs')
+  return { issue, hypothesesTested: hypothesisList.length, investigatorsCompleted: valid.length, rootCause: valid.join('\n\n'), error: 'synthesizer failed' }
+}
 
 return { issue, hypothesesTested: hypothesisList.length, investigatorsCompleted: valid.length, rootCause }
 ```

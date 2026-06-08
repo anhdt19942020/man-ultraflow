@@ -23,8 +23,16 @@ export const meta = {
   ],
 }
 
-const n = Math.min((args && args.n) || 3, 5)
-const scope = (args && args.scope) || 'the current codebase changes'
+// args may arrive as an object OR a JSON string (harness-dependent) — normalize both.
+const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args || {}) } catch (e) { return {} } })()
+const n = Math.max(1, Math.min(A.n || 3, 5))
+const scope = A.scope || 'the current codebase changes'
+
+// Abort early on an empty scope instead of running reviewers on a placeholder.
+if (!A.scope) {
+  log('No scope provided (args carried no scope) — aborting.')
+  return { error: 'empty-input', hint: 'Re-run: /man:ultraflow --review "<file path or PR description>"' }
+}
 
 const useCkSkill = (name, dir) =>
   `Use the ORIGINAL ${name} skill as the single source of truth — do NOT invent a different process.\n` +
@@ -78,6 +86,12 @@ Apply ck:code-review's rules: every finding needs specific file:line / snippet e
 const valid = reviews.filter(Boolean)
 log(`${valid.length}/${n} reviewers completed`)
 
+// Abort before synthesis if every reviewer failed (nothing to deduplicate or rank).
+if (valid.length === 0) {
+  log('All reviewer agents failed — aborting before synthesis')
+  return { total: 0, critical: 0, important: 0, moderate: 0, error: 'all reviewers failed' }
+}
+
 const allFindings = valid.flatMap(r => (r.findings || []).map(f => ({ ...f, dimension: r.dimension })))
 const byKey = f => `${f.title}::${f.evidence}`.toLowerCase().slice(0, 80)
 const seen = new Set()
@@ -104,6 +118,12 @@ ${moderate.length ? moderate.map(f => `[${f.dimension}] ${f.title}\n  Evidence: 
 Write: 1) one-line overall quality summary, 2) numbered action items sorted by severity (CRITICAL first), each with severity tag + what/where/how to fix.`,
   { label: 'synthesizer', phase: 'Synthesize' }
 )
+
+// Guard: synthesizer returned nothing — fall back to the structured findings instead of a null report.
+if (!synthesis) {
+  log('Synthesizer agent returned nothing — returning structured findings without prose report')
+  return { total: deduped.length, critical: critical.length, important: important.length, moderate: moderate.length, report: deduped.map(f => `[${f.severity}][${f.dimension}] ${f.title} — ${f.recommendation}`).join('\n'), error: 'synthesizer failed' }
+}
 
 return { total: deduped.length, critical: critical.length, important: important.length, moderate: moderate.length, report: synthesis }
 ```

@@ -23,8 +23,16 @@ export const meta = {
   ],
 }
 
-const n = (args && args.n) || 3
-const topic = (args && args.topic) || 'the given topic'
+// args may arrive as an object OR a JSON string (harness-dependent) — normalize both.
+const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args || {}) } catch (e) { return {} } })()
+const n = A.n || 3
+const topic = A.topic || 'the given topic'
+
+// Abort early on an empty topic instead of running researchers on a placeholder.
+if (!A.topic) {
+  log('No topic provided (args carried no topic) — aborting.')
+  return { error: 'empty-input', hint: 'Re-run: /man:ultraflow --research "<topic>"' }
+}
 
 const useCkSkill = (name, dir) =>
   `Use the ORIGINAL ${name} skill as the single source of truth — do NOT invent a different process.\n` +
@@ -50,6 +58,12 @@ const reports = await parallel(ANGLES.map((angle, i) => () =>
 const valid = reports.filter(Boolean)
 log(`${valid.length}/${n} researchers completed`)
 
+// Abort before synthesis if every researcher failed (nothing to synthesize).
+if (valid.length === 0) {
+  log('All researcher agents failed — aborting before synthesis')
+  return { error: 'all agents failed', topic }
+}
+
 phase('Synthesize')
 const synthesis = await agent(
   `${useCkSkill('ck:research', 'research')}
@@ -66,6 +80,12 @@ Produce a unified report:
 ## Open Questions`,
   { label: 'synthesizer', phase: 'Synthesize' }
 )
+
+// Guard: synthesizer returned nothing — surface raw reports rather than silently returning null.
+if (!synthesis) {
+  log('Synthesizer agent returned nothing — returning raw research outputs')
+  return { error: 'synthesizer failed', topic, researchers: valid.length, rawReports: valid.join('\n\n') }
+}
 
 return synthesis
 ```

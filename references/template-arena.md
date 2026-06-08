@@ -9,14 +9,14 @@ This is the meta-entry point: you give a plain prompt, the router picks the righ
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `prompt` | string | required | Any task/question/decision in natural language |
-| `n` | number | optional | Override the number of contest agents (else router decides, 2-3) |
+| `n` | number | optional | Override the number of contest agents (else router decides, 2-3; clamped to 2-4) |
 
 ## Routing table (the router follows this)
 
 | Prompt intent | PRODUCE (ck:) | CONTEST (ck:) | N | Contest what |
 |---|---|---|---|---|
 | implement / code / build / add feature | `ck:cook` (mutates) | `ck:code-review` + `ck:test` | 2-3 | bugs, regressions, broken contracts, missing tests |
-| plan / architect / design / roadmap | `ck:plan` | `ck:predict` + architect-critic | 2-3 | false assumptions, missing edge cases, over-engineering, infeasibility |
+| plan / architect / design / roadmap | `ck:plan` | `ck:predict` | 2-3 | false assumptions, missing edge cases, over-engineering, infeasibility |
 | fix bug / error / failing test | `ck:fix` (mutates) | `ck:debug` + `ck:code-review` | 2-3 | wrong root cause, regressions |
 | debug / find root cause / why | `ck:debug` | additional `ck:debug` investigators | 3 | competing hypotheses |
 | research / find info / compare | `ck:research` | research verifiers | 2-3 | wrong/unsourced claims, missing data |
@@ -37,8 +37,16 @@ export const meta = {
   ],
 }
 
-const prompt = (args && args.prompt) || 'the given task'
-const nOverride = args && args.n
+// args may arrive as an object OR a JSON string (harness-dependent) — normalize both.
+const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args || {}) } catch (e) { return {} } })()
+const prompt = A.prompt || 'the given task'
+const nOverride = A.n
+
+// Abort early on an empty prompt instead of running a full PRODUCE→CONTEST→JUDGE cycle on a placeholder.
+if (!A.prompt) {
+  log('No prompt provided (args carried no prompt) — aborting.')
+  return { error: 'empty-prompt', hint: 'Re-run: /man:ultraflow --arena "<your task>"' }
+}
 
 const useCkSkill = (name, dir) =>
   `Use the ORIGINAL ${name} skill as the single source of truth — do NOT invent a different process.\n` +
@@ -72,7 +80,7 @@ const ROUTE_SCHEMA = {
       items: { type: 'object', properties: { name: { type: 'string' }, dir: { type: 'string' } }, required: ['name', 'dir'] },
       description: 'ck: skills the adversaries use',
     },
-    n_agents: { type: 'number', description: 'number of contest agents, 2-3' },
+    n_agents: { type: 'number', minimum: 2, maximum: 4, description: 'number of contest agents, 2-3 (hard cap 4)' },
     contest_targets: { type: 'array', items: { type: 'string' }, description: 'what the adversaries must attack' },
     complexity: { type: 'string', enum: ['low', 'medium', 'high'], description: 'reasoning difficulty of this task' },
     producer_model: { type: 'string', enum: ['opus', 'sonnet', 'haiku'], description: 'model tier for the producer' },
@@ -106,8 +114,14 @@ if (!route) {
   return { prompt, error: 'router failed' }
 }
 
+if (!route.contesters || route.contesters.length === 0) {
+  log('Router returned no contesters — aborting')
+  return { prompt, intent: route.intent, error: 'no contesters' }
+}
+
 const n = Math.max(2, Math.min(nOverride || route.n_agents || 2, 4))
-const contesterModels = route.contester_models || []
+// Backfill to length n so the returned models align with `agents: n` (the 'inherit' sentinel → safe session model).
+const contesterModels = Array.from({ length: n }, (_, i) => (route.contester_models || [])[i] || 'inherit')
 log(`Intent: ${route.intent} (${route.complexity}) → produce ${route.producer_skill} [${route.producer_model || 'inherit'}], contest ${route.contesters.map(c => c.name).join(', ')} (${n} agents), judge [${route.judge_model || 'inherit'}]`)
 
 phase('Produce')
@@ -118,9 +132,18 @@ Task: ${prompt}
 
 Produce this deliverable: ${route.deliverable}
 
-Report exactly what you produced. ${route.mutates_files ? 'Commit your changes with a conventional commit message and report the branch + the file:line changes so reviewers can inspect them.' : 'Output the full artifact so reviewers can scrutinize it.'}`,
+Report exactly what you produced. ${route.mutates_files ? 'Commit your changes with a conventional commit message, report the file:line changes so reviewers can inspect them, and end your report with the branch name on its own final line in the EXACT form `BRANCH: <branch-name>`.' : 'Output the full artifact so reviewers can scrutinize it.'}`,
   { label: 'producer', phase: 'Produce', ...modelOpt(route.producer_model), ...(route.mutates_files ? { isolation: 'worktree' } : {}) }
 )
+
+if (!artifact) {
+  log('Producer failed — aborting (nothing to contest)')
+  return { prompt, intent: route.intent, producer: route.producer_skill, error: 'producer failed' }
+}
+
+// Extract the worktree branch (when the producer mutated files) so the caller can merge it structurally.
+const branchMatch = route.mutates_files && typeof artifact === 'string' ? artifact.match(/BRANCH:\s*(\S+)/) : null
+const branch = branchMatch ? branchMatch[1] : null
 
 phase('Contest')
 const critiques = await parallel(
@@ -153,9 +176,16 @@ Report: ## Objections (rated, with evidence) / ## What holds up / ## Verdict (ar
 const valid = critiques.filter(Boolean)
 log(`${valid.length}/${n} contesters reported`)
 
+if (valid.length === 0) {
+  log('All contesters failed — aborting before judge (no objections to weigh)')
+  return { prompt, intent: route.intent, producer: route.producer_skill, artifact, branch, error: 'all contesters failed' }
+}
+
 phase('Judge')
 const verdict = await agent(
   `You are the impartial JUDGE of an adversarial arena. Weigh the produced artifact against the contesters' objections and rule.
+
+Contest coverage: ${valid.length} of ${n} contesters reported — weight partial rounds accordingly (fewer reports means thinner adversarial coverage, NOT implicit approval).
 
 Original task: ${prompt}
 
@@ -186,6 +216,7 @@ return {
   judgeModel: route.judge_model,
   agents: n,
   mutatedFiles: route.mutates_files,
+  branch,
   verdict,
 }
 ```
@@ -196,5 +227,5 @@ return {
 - **`--agents N`** overrides the router's agent count (clamped 2-4).
 - **Auto model selection:** the router assigns a model tier per agent (opus/sonnet/haiku) based on task complexity, and diversifies the contesters' models so different tiers catch different faults. Invalid/missing tiers fall back to the inherited session model (safe). The `agent()` `model` option is what makes this work.
 - The adversarial structure lives entirely here; every agent still uses the original ck: skills as tools — ck: is never modified.
-- If the producer mutated files (`ck:cook` / `ck:fix`), it ran in an isolated worktree. After a REVISE/ACCEPT verdict, merge the branch: `git worktree list` → `git merge <branch>`.
+- If the producer mutated files (`ck:cook` / `ck:fix`), it ran in an isolated worktree and the branch is returned in the `branch` field. Merge depends on the verdict: on **ACCEPT** merge as-is (`git merge <branch>`); on **REVISE** apply the required actions on the branch first, then merge; on **REJECT** discard. Clean up afterward with `git worktree remove <path>` (resolve any merge conflicts manually).
 - Requires the ck: skills the router routes to (cook, ck-code-review, test, ck-plan, ck-predict, fix, ck-debug, research, ck-security).

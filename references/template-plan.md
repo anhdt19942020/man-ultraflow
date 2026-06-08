@@ -24,9 +24,17 @@ export const meta = {
   ],
 }
 
-const task = (args && args.task) || 'the given task'
-const n = (args && args.n) || 2
-const mode = (args && args.mode) || 'fast'
+// args may arrive as an object OR a JSON string (harness-dependent) — normalize both.
+const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args || {}) } catch (e) { return {} } })()
+const task = A.task || 'the given task'
+const n = A.n || 2
+const mode = A.mode || 'fast'
+
+// Abort early on an empty task instead of producing a plan for a placeholder.
+if (!A.task) {
+  log('No task provided (args carried no task) — aborting.')
+  return { error: 'empty-input', hint: 'Re-run: /man:ultraflow --plan "<task>"' }
+}
 
 // Delegation contract — every agent loads and follows the ORIGINAL ck: skill.
 const useCkSkill = (name, dir) =>
@@ -56,6 +64,12 @@ const reports = mode === 'fast'
 const validReports = reports.filter(Boolean)
 log(mode === 'fast' ? 'Fast mode — skipping research' : `${validReports.length}/${n} researchers completed`)
 
+// In hard/deep mode, abort if every researcher failed — otherwise the planner gets fast-mode context while planFlag still says --hard/--deep (silent mode mismatch).
+if (mode !== 'fast' && validReports.length === 0) {
+  log(`All researchers failed in ${mode} mode — aborting before planning`)
+  return { task, mode, researchers: 0, error: 'all researchers failed' }
+}
+
 phase('Plan')
 const planFlag = mode === 'fast' ? '--fast' : mode === 'deep' ? '--deep' : '--hard'
 const plan = await agent(
@@ -70,6 +84,12 @@ ${validReports.length > 0
 Produce the plan.md + phase-*.md exactly as ck:plan specifies (frontmatter, phases table, per-phase structure). Do NOT implement code.`,
   { label: 'planner', phase: 'Plan' }
 )
+
+// Guard: planner returned nothing — the downstream caller depends on this output.
+if (!plan) {
+  log('Planner agent returned nothing — aborting')
+  return { task, mode, researchers: validReports.length, error: 'planner failed' }
+}
 
 return { task, mode, researchers: validReports.length, plan }
 ```

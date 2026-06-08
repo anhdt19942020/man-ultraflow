@@ -23,8 +23,16 @@ export const meta = {
   ],
 }
 
-const topic = (args && args.topic) || 'the given topic'
-const n = (args && args.n) || 3
+// args may arrive as an object OR a JSON string (harness-dependent) — normalize both.
+const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args || {}) } catch (e) { return {} } })()
+const topic = A.topic || 'the given topic'
+const n = A.n || 3
+
+// Abort early on an empty topic instead of brainstorming on a placeholder.
+if (!A.topic) {
+  log('No topic provided (args carried no topic) — aborting.')
+  return { error: 'empty-input', hint: 'Re-run: /man:ultraflow --brainstorm "<topic>"' }
+}
 
 const useCkSkill = (name, dir) =>
   `Use the ORIGINAL ${name} skill as the single source of truth — do NOT invent a different process.\n` +
@@ -56,6 +64,12 @@ Adopt the perspective of ${angle}. Commit to a specific, opinionated approach (c
 const valid = proposals.filter(Boolean)
 log(`${valid.length}/${n} proposals generated`)
 
+// Abort before synthesis if every brainstorm agent failed (nothing to consolidate).
+if (valid.length === 0) {
+  log('All brainstorm agents failed — aborting before synthesis')
+  return { topic, proposals: 0, error: 'all agents failed' }
+}
+
 phase('Synthesize')
 const synthesis = await agent(
   `${useCkSkill('ck:brainstorm', 'brainstorm')}
@@ -72,6 +86,12 @@ Following ck:brainstorm's method, produce a FINAL RECOMMENDATION:
 5. Concrete next steps`,
   { label: 'synthesizer', phase: 'Synthesize' }
 )
+
+// Guard: synthesizer returned nothing — surface raw proposals rather than silently returning null.
+if (!synthesis) {
+  log('Synthesizer agent returned nothing — returning raw proposals')
+  return { topic, proposals: valid.length, synthesis: valid.join('\n\n'), error: 'synthesizer failed' }
+}
 
 return { topic, proposals: valid.length, synthesis }
 ```
