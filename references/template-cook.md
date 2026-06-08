@@ -1,6 +1,8 @@
 # Ultraflow — Cook Template
 
-Workflow script for parallel implementation. Scouts codebase → generates plan → spawns N parallel developers (each in isolated worktree) → runs tester.
+Workflow script for parallel implementation. One scout agent (following **ck:scout**) → one planner (following **ck:plan**) splits the task into N file-disjoint subtasks → N developers each implement their subtask following **ck:cook** in an isolated worktree → one tester (following **ck:test**) verifies.
+
+Every phase delegates to the original ck: skill; Workflow provides the parallel fan-out and worktree isolation.
 
 ## Args
 
@@ -8,19 +10,19 @@ Workflow script for parallel implementation. Scouts codebase → generates plan 
 |---|---|---|---|
 | `task` | string | required | Feature/task description |
 | `n` | number | 2 | Number of parallel developers |
-| `planPath` | string | optional | Path to existing plan file to skip planning phase |
+| `planPath` | string | optional | Existing plan path — skips scout + plan phases |
 
 ## Workflow Script
 
 ```javascript
 export const meta = {
   name: 'ultraflow-cook',
-  description: 'Implement a feature with parallel devs in isolated worktrees, then test',
+  description: 'ck:scout + ck:plan split, then N ck:cook devs in worktrees, then ck:test',
   phases: [
-    { title: 'Scout', detail: 'Scan codebase for relevant patterns and files' },
-    { title: 'Plan', detail: 'Break task into independent subtasks per developer' },
-    { title: 'Implement', detail: 'N parallel developers, each in own git worktree' },
-    { title: 'Test', detail: 'Run full test suite across merged changes' },
+    { title: 'Scout', detail: 'One agent runs ck:scout for context' },
+    { title: 'Plan', detail: 'One agent runs ck:plan to split into N file-disjoint subtasks' },
+    { title: 'Implement', detail: 'N developers each run ck:cook on a subtask in its own worktree' },
+    { title: 'Test', detail: 'One agent runs ck:test across the merged changes' },
   ],
 }
 
@@ -28,108 +30,83 @@ const task = (args && args.task) || 'the given task'
 const n = (args && args.n) || 2
 const planPath = args && args.planPath
 
-phase('Scout')
-const scoutReport = await agent(
-  `Scout the codebase for context needed to implement: ${task}
+const useCkSkill = (name, dir) =>
+  `Use the ORIGINAL ${name} skill as the single source of truth — do NOT invent a different process.\n` +
+  `Load it first: call the Skill tool with skill "${name}". If the Skill tool is unavailable to you, Read ~/.claude/skills/${dir}/SKILL.md and every reference file it instructs you to load.\n` +
+  `Then follow that skill's steps, gates, and output format EXACTLY for the work below.`
 
-Return:
-1. Project type, language, framework
-2. Files most relevant to this task (with paths)
-3. Existing patterns/conventions to follow
-4. Public contracts that must stay stable (APIs, schemas, types)
-5. Suggested split: how to divide this task into ${n} independent subtasks with NO file overlap`,
-  { label: 'scout' }
-)
+let scoutReport = ''
+let plan
 
-phase('Plan')
-const plan = planPath
-  ? await agent(`Read the plan at: ${planPath}\nReturn the plan content verbatim.`, { label: 'plan-reader' })
-  : await agent(
-      `Create an implementation plan for: ${task}
+if (planPath) {
+  phase('Plan')
+  plan = await agent(`Read the plan at: ${planPath}\nReturn its full content verbatim.`, { label: 'plan-reader', phase: 'Plan' })
+} else {
+  phase('Scout')
+  scoutReport = await agent(
+    `${useCkSkill('ck:scout', 'scout')}\n\nScout the codebase for everything needed to implement: ${task}\nReturn project type, relevant files, conventions, public contracts, and overlapping plans.`,
+    { label: 'scout', phase: 'Scout' }
+  )
 
-Scout report:
+  phase('Plan')
+  plan = await agent(
+    `${useCkSkill('ck:plan', 'ck-plan')}
+
+Run ck:plan --parallel for: ${task}
+
+You are PROVIDED with this scout report — skip ck:plan's internal scouting and use it directly:
 ${scoutReport}
 
-Requirements:
-- Split into exactly ${n} independent subtasks
-- Each subtask MUST own distinct files (no overlap — devs work in parallel)
-- List file ownership per subtask as glob patterns
-- Each subtask must be completable without the other finishing first
-- Include acceptance criteria per subtask
+CRITICAL for parallel execution: split the work into EXACTLY ${n} subtasks where each subtask OWNS DISTINCT files (no overlap), each independently completable. For each subtask give: title, file-ownership globs, goal, steps, acceptance criteria.`,
+    { label: 'planner', phase: 'Plan' }
+  )
+}
 
-Format:
-## Subtask 1 — <title>
-File ownership: <glob patterns>
-Goal: <what this subtask implements>
-Steps: <numbered implementation steps>
-Acceptance: <what done looks like>
-
-## Subtask 2 — <title>
-...`,
-      { label: 'planner' }
-    )
-
-log('Plan ready, spawning developers')
+log(`Plan ready — spawning ${n} developers`)
 
 phase('Implement')
+const devResults = await parallel(
+  Array.from({ length: n }, (_, i) => () =>
+    agent(
+      `${useCkSkill('ck:cook', 'cook')}
 
-const subtaskPrompts = Array.from({ length: n }, (_, i) => `
-You are developer-${i + 1} implementing subtask ${i + 1} from the plan below.
-Read your subtask section carefully. Only touch files in YOUR file ownership glob.
-Do NOT touch files owned by other subtasks.
+You are developer-${i + 1}. Implement ONLY subtask ${i + 1} from the plan below, following ck:cook (code mode — the plan already encodes scout + requirements). Touch ONLY files in YOUR subtask's ownership glob; never touch other subtasks' files.
 
 Full task context: ${task}
 
 Plan:
 ${plan}
+${scoutReport ? `\nScout report:\n${scoutReport}` : ''}
 
-Scout report:
-${scoutReport}
-
-When done: commit your changes with a conventional commit message (feat:, fix:, etc.).
-`)
-
-const devResults = await parallel(
-  subtaskPrompts.map((prompt, i) => () =>
-    agent(prompt, {
-      label: `dev-${i + 1}`,
-      phase: 'Implement',
-      isolation: 'worktree',
-    })
+When done: commit your changes with a conventional commit message.`,
+      { label: `dev-${i + 1}`, phase: 'Implement', isolation: 'worktree' }
+    )
   )
 )
 
-const completedDevs = devResults.filter(Boolean)
-log(`${completedDevs.length}/${n} developers completed`)
+const completed = devResults.filter(Boolean)
+log(`${completed.length}/${n} developers completed`)
 
 phase('Test')
 const testResult = await agent(
-  `Run the full test suite and report results.
+  `${useCkSkill('ck:test', 'test')}
 
-Task that was just implemented: ${task}
+Run the full test suite for the work just implemented: ${task}
 
 Developer results:
-${completedDevs.map((r, i) => `Dev ${i + 1}: ${r}`).join('\n\n')}
+${completed.map((r, i) => `Dev ${i + 1}: ${r}`).join('\n\n')}
 
-Steps:
-1. Check for any merge conflicts from parallel dev branches
-2. Run the project test suite
-3. Report: pass/fail counts, any failing tests with error messages
-4. Verify the implemented task meets its acceptance criteria`,
+Steps: check for merge conflicts across the parallel dev branches, run the suite per ck:test, report pass/fail counts with failing-test errors, and confirm each subtask's acceptance criteria.`,
   { label: 'tester', phase: 'Test' }
 )
 
-return {
-  task,
-  devsCompleted: completedDevs.length,
-  plan,
-  testResult,
-}
+return { task, devsCompleted: completed.length, plan, testResult }
 ```
 
 ## Notes
 
-- `isolation: 'worktree'` gives each dev their own git branch — no file conflicts even if they touch the same area by mistake
-- After Workflow completes, lead must merge worktree branches: `git worktree list` then `git merge <branch>`
-- Pass `args.planPath` to skip the scout+plan phases and jump straight to implement
-- Default `n=2` is safest — more devs = more merge complexity; use `n=3` only when subtasks are clearly independent
+- Scout = ck:scout, plan split = ck:plan --parallel, each dev = ck:cook (code mode), test = ck:test — all nguyên bản.
+- `isolation: 'worktree'` puts each dev on its own branch. After completion: `git worktree list`, then merge each branch.
+- Pass `args.planPath` to skip scout + plan and go straight to implement.
+- Requires `ck:scout`, `ck:plan`, `ck:cook`, `ck:test` installed.
+- Default `n=2` (safest for merge); use `n=3` only when subtasks are clearly file-disjoint.

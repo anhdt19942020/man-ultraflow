@@ -1,6 +1,8 @@
 # Ultraflow — Plan Template
 
-Workflow script for parallel planning. Scouts codebase → parallel researchers investigate different aspects → planner synthesizes into a comprehensive plan document.
+Workflow script for parallel planning. N researchers (each following the original **research** skill) investigate distinct angles → one planner agent following the original **ck:plan** skill synthesizes the phased plan from their reports.
+
+The logic is the ck: skill verbatim; the Workflow layer only parallelizes the research phase and feeds reports into ck:plan (which explicitly skips its own research when "provided with researcher reports").
 
 ## Args
 
@@ -8,18 +10,17 @@ Workflow script for parallel planning. Scouts codebase → parallel researchers 
 |---|---|---|---|
 | `task` | string | required | Feature/task description to plan |
 | `n` | number | 2 | Number of parallel researchers |
-| `mode` | string | `"fast"` | Planning depth: `"fast"` (scout→plan), `"hard"` (research+plan), `"deep"` (research+plan+redteam) |
+| `mode` | string | `"fast"` | `"fast"` (skip research → ck:plan --fast), `"hard"` (research + ck:plan), `"deep"` (research + ck:plan + red-team) |
 
 ## Workflow Script
 
 ```javascript
 export const meta = {
   name: 'ultraflow-plan',
-  description: 'Create implementation plan with parallel research, then synthesize into phase-based plan document',
+  description: 'Parallel research feeding the original ck:plan skill to produce a phased plan',
   phases: [
-    { title: 'Scout', detail: 'Scan codebase for context, patterns, and conventions' },
-    { title: 'Research', detail: 'N parallel researchers investigate different aspects' },
-    { title: 'Plan', detail: 'Synthesize research into comprehensive phased plan' },
+    { title: 'Research', detail: 'N parallel researchers, each following the research skill' },
+    { title: 'Plan', detail: 'One planner following ck:plan verbatim, fed the researcher reports' },
   ],
 }
 
@@ -27,144 +28,56 @@ const task = (args && args.task) || 'the given task'
 const n = (args && args.n) || 2
 const mode = (args && args.mode) || 'fast'
 
-phase('Scout')
-const scoutReport = await agent(
-  `Scout the codebase to gather context for planning: ${task}
+// Delegation contract — every agent loads and follows the ORIGINAL ck: skill.
+const useCkSkill = (name, dir) =>
+  `Use the ORIGINAL ${name} skill as the single source of truth — do NOT invent a different process.\n` +
+  `Load it first: call the Skill tool with skill "${name}". If the Skill tool is unavailable to you, Read ~/.claude/skills/${dir}/SKILL.md and every reference file it instructs you to load.\n` +
+  `Then follow that skill's steps, gates, and output format EXACTLY for the work below.`
 
-Return:
-1. Project type, language, framework, key dependencies
-2. Files and modules most relevant to this task (with paths)
-3. Existing patterns, conventions, and code standards to follow
-4. Public contracts that must stay stable (APIs, schemas, types, env vars)
-5. Existing plans in ./plans/ that overlap with this task
-6. Potential risks and constraints`,
-  { label: 'scout', phase: 'Scout' }
-)
-
-phase('Research')
-
-const researchTopics = [
-  `Technical implementation approach for: ${task}\n\nFocus on: architecture patterns, library choices, data flow, component design.\nScout context:\n${scoutReport}`,
-  `Edge cases, risks, and acceptance criteria for: ${task}\n\nFocus on: error scenarios, security concerns, performance requirements, validation rules, definition of done.\nScout context:\n${scoutReport}`,
+const RESEARCH_ANGLES = [
+  `Architecture, patterns, and proven approaches for: ${task}`,
+  `Risks, edge cases, failure modes, security, and acceptance criteria for: ${task}`,
+  `Integration points, existing-code touchpoints, and migration strategy for: ${task}`,
+  `Tooling, libraries, performance, and operational concerns for: ${task}`,
 ]
 
-if (n > 2) {
-  researchTopics.push(
-    `Integration points and migration strategy for: ${task}\n\nFocus on: existing code touchpoints, breaking changes, backward compatibility, rollout strategy.\nScout context:\n${scoutReport}`
-  )
-}
-
-const extraTopics = Array.from({ length: Math.max(0, n - 3) }, (_, i) =>
-  `Deep-dive research angle ${i + 4} for: ${task}\n\nInvestigate: testing strategy, performance benchmarks, developer experience, monitoring/observability.\nScout context:\n${scoutReport}`
-)
-
-const allTopics = [...researchTopics.slice(0, n), ...extraTopics]
-
-const researchResults = mode === 'fast'
+phase('Research')
+const reports = mode === 'fast'
   ? []
   : await parallel(
-      allTopics.map((topic, i) => () =>
-        agent(topic, { label: `researcher-${i + 1}`, phase: 'Research' })
+      RESEARCH_ANGLES.slice(0, n).map((angle, i) => () =>
+        agent(
+          `${useCkSkill('research', 'research')}\n\nYour assigned research angle: ${angle}\n\nReturn a structured, evidence-based report (executive summary, key findings, recommendations, open questions).`,
+          { label: `researcher-${i + 1}`, phase: 'Research' }
+        )
       )
     )
 
-log('Research complete, synthesizing plan')
+const validReports = reports.filter(Boolean)
+log(mode === 'fast' ? 'Fast mode — skipping research' : `${validReports.length}/${n} researchers completed`)
 
 phase('Plan')
+const planFlag = mode === 'fast' ? '--fast' : mode === 'deep' ? '--deep' : '--hard'
+const plan = await agent(
+  `${useCkSkill('ck:plan', 'ck-plan')}
 
-const plannerPrompt = `Create a comprehensive, phased implementation plan for: ${task}
+Run ck:plan in ${planFlag} mode for this task: ${task}
 
-Scout report:
-${scoutReport}
+${validReports.length > 0
+  ? `You are PROVIDED with the following researcher reports — per ck:plan's own rules, skip the internal research phase and use these directly:\n\n${validReports.map((r, i) => `=== Researcher ${i + 1} (${RESEARCH_ANGLES[i]}) ===\n${r}`).join('\n\n')}`
+  : '(fast mode — no researcher reports; follow ck:plan --fast)'}
 
-${researchResults.length > 0 ? `Research findings:\n${researchResults.filter(Boolean).map((r, i) => `=== Researcher ${i + 1} ===\n${r}`).join('\n\n')}` : '(fast mode — no research phase)'}
-
-## Output Requirements
-
-Write a complete plan following this structure:
-
-### plan.md
-- Title, status, priority
-- Phases table with ID, title, status, dependencies
-- Key decisions and constraints
-- Success criteria
-
-### For each phase (phase-01-xxx.md through phase-NN-xxx.md):
-Use this structure:
-\`\`\`
----
-phase: N
-title: "Phase Name"
-status: pending
-priority: P2
-effort: "Xh"
-dependencies: []
----
-
-# Phase N: Name
-
-## Overview
-1-2 sentences.
-
-## Requirements
-- Functional: ...
-- Non-functional: ...
-
-## Architecture
-Design, data flow, component interactions.
-
-## Related Code Files
-- Create: path/...
-- Modify: path/...
-
-## Implementation Steps
-1. ...
-
-## Success Criteria
-- [ ] ...
-
-## Risk Assessment
-Risks + mitigations.
-\`\`\`
-
-Rules:
-- Minimum 2, maximum 6 phases
-- Each phase must be independently testable
-- Implementation steps must be specific enough for a junior developer
-- Follow codebase conventions from scout report
-- Respect YAGNI, KISS, DRY principles
-- Do NOT write code — write plans only`
-
-const plan = await agent(plannerPrompt, { label: 'planner', phase: 'Plan' })
-
-${mode === 'deep' ? `
-phase('Red Team')
-const redTeam = await agent(
-  \`Adversarially review this implementation plan for: ${task}
-
-Plan:
-\${plan}
-
-Find:
-1. Unexamined assumptions that could invalidate the approach
-2. Missing edge cases or error scenarios
-3. Security vulnerabilities or data integrity risks
-4. Over-engineering (YAGNI violations) or under-engineering
-5. Dependencies that could block or delay phases
-6. Acceptance criteria that are vague or untestable
-
-For each issue: severity (critical/major/minor), description, suggested fix.\`,
-  { label: 'red-team', phase: 'Red Team' }
+Produce the plan.md + phase-*.md exactly as ck:plan specifies (frontmatter, phases table, per-phase structure). Do NOT implement code.`,
+  { label: 'planner', phase: 'Plan' }
 )
 
-return { task, mode, plan, redTeam }
-` : `return { task, mode, plan }`}
+return { task, mode, researchers: validReports.length, plan }
 ```
 
 ## Notes
 
-- `mode: "fast"` skips research phase — goes directly scout→plan; fastest, best for simple tasks
-- `mode: "hard"` runs N parallel researchers before planning; better for complex features
-- `mode: "deep"` adds adversarial red-team review after planning; best for high-risk changes
-- After workflow completes, save `plan` output to `./plans/<timestamp>-<slug>/plan.md` and phase files
-- Default `n=2` researchers; more adds coverage but diminishing returns past 3
+- `mode: "fast"` → no research; the planner runs `ck:plan --fast` (scout→plan).
+- `mode: "hard"` → N parallel researchers (research skill) feed `ck:plan --hard`.
+- `mode: "deep"` → same as hard but the planner runs `ck:plan --deep` (adds red-team + validation per the ck:plan workflow).
+- Requires the `ck:plan` and `research` skills to be installed (`~/.claude/skills/ck-plan`, `~/.claude/skills/research`).
+- The plan content + structure are ck:plan's; Workflow only parallelizes research.

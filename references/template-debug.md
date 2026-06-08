@@ -1,6 +1,8 @@
 # Ultraflow — Debug Template
 
-Workflow script for adversarial debugging. N agents each champion a competing hypothesis and actively try to disprove each other, then converge on root cause.
+Workflow script for adversarial debugging. N agents each run the original **ck:debug** skill championing a competing hypothesis and actively trying to disprove the others → one synthesizer (following ck:debug) converges on the root cause.
+
+Root-cause discipline, defense-in-depth, and verification are ck:debug's; Workflow runs the competing hypotheses in parallel and forces adversarial cross-examination.
 
 ## Args
 
@@ -14,45 +16,45 @@ Workflow script for adversarial debugging. N agents each champion a competing hy
 ```javascript
 export const meta = {
   name: 'ultraflow-debug',
-  description: 'Debug an issue with N competing hypotheses, adversarial disproof, root cause synthesis',
+  description: 'N parallel ck:debug investigations of competing hypotheses, adversarial convergence',
   phases: [
-    { title: 'Hypothesize', detail: 'Generate N independently testable theories' },
-    { title: 'Investigate', detail: 'Each agent champions one theory, tries to disprove others' },
-    { title: 'Converge', detail: 'Synthesize surviving evidence into root cause report' },
+    { title: 'Hypothesize', detail: 'One ck:debug pass generates N independently testable theories' },
+    { title: 'Investigate', detail: 'N agents each run ck:debug on one theory, disproving the others' },
+    { title: 'Converge', detail: 'One ck:debug synthesis produces the root-cause report' },
   ],
 }
 
 const issue = (args && args.issue) || 'the reported issue'
 const n = (args && args.n) || 3
 
+const useCkSkill = (name, dir) =>
+  `Use the ORIGINAL ${name} skill as the single source of truth — do NOT invent a different process.\n` +
+  `Load it first: call the Skill tool with skill "${name}". If the Skill tool is unavailable to you, Read ~/.claude/skills/${dir}/SKILL.md and every reference file it instructs you to load.\n` +
+  `Then follow that skill's steps, gates, and discipline EXACTLY for the work below.`
+
 phase('Hypothesize')
 const hypotheses = await agent(
-  `Generate ${n} competing hypotheses for this issue: ${issue}
+  `${useCkSkill('ck:debug', 'ck-debug')}
 
-Rules:
-- Each hypothesis must be INDEPENDENTLY TESTABLE (different observable evidence)
-- Each must predict DIFFERENT symptoms — no near-duplicates
-- Frame each as: "If <cause>, then we should observe <specific evidence>"
-- Cover different layers: application logic, data/state, infrastructure, race conditions, config
+Begin ck:debug Phase 1 (Root Cause Investigation) for: ${issue}
+Generate exactly ${n} COMPETING, independently testable hypotheses — each predicting different observable evidence, across different layers (app logic, data/state, infra, races, config).
 
-Return exactly ${n} hypotheses as a numbered list. Each on one line:
-1. If <cause>, then <observable evidence>
+Return a numbered list, each one line:
+1. If <cause>, then we should observe <specific evidence>
 2. ...`,
   { label: 'hypothesizer', phase: 'Hypothesize' }
 )
 
-log(`Hypotheses generated, spawning ${n} investigators`)
-
-const hypothesisList = hypotheses
-  .split('\n')
-  .filter(l => /^\d+\./.test(l.trim()))
-  .slice(0, n)
+const hypothesisList = hypotheses.split('\n').filter(l => /^\d+\./.test(l.trim())).slice(0, n)
+log(`${hypothesisList.length} hypotheses — spawning investigators`)
 
 phase('Investigate')
 const investigations = await parallel(
   hypothesisList.map((hypothesis, i) => () =>
     agent(
-      `You are investigator-${i + 1}. Your job: test your hypothesis AND actively try to disprove the others.
+      `${useCkSkill('ck:debug', 'ck-debug')}
+
+You are investigator-${i + 1}. Run ck:debug's root-cause-tracing and verification discipline.
 
 Issue: ${issue}
 
@@ -61,28 +63,13 @@ ${hypothesisList.map((h, j) => `${j + 1}. ${h}`).join('\n')}
 
 YOUR hypothesis to champion: ${hypothesis}
 
-Investigation protocol:
-1. Search the codebase for evidence FOR your hypothesis (file:line citations required)
-2. Search for evidence AGAINST your hypothesis (be honest)
+Protocol (per ck:debug):
+1. Evidence FOR your hypothesis (file:line citations required)
+2. Evidence AGAINST your hypothesis (be honest)
 3. For each OTHER hypothesis, find evidence that would DISPROVE it
-4. Conclude: CONFIRMED / REFUTED / INCONCLUSIVE with confidence 0-100%
+4. Verdict: CONFIRMED / REFUTED / INCONCLUSIVE with confidence 0-100%
 
-Report format:
-## Hypothesis
-<your hypothesis>
-
-## Evidence FOR
-- <finding> (file:line)
-
-## Evidence AGAINST
-- <finding> (file:line) or "None found"
-
-## Challenges to other hypotheses
-- Hypothesis X: <why evidence contradicts it>
-
-## Verdict
-CONFIRMED / REFUTED / INCONCLUSIVE — <confidence>%
-<one sentence rationale>`,
+Report: ## Hypothesis / ## Evidence FOR / ## Evidence AGAINST / ## Challenges to others / ## Verdict`,
       { label: `investigator-${i + 1}`, phase: 'Investigate' }
     )
   )
@@ -93,45 +80,29 @@ log(`${valid.length}/${n} investigators completed`)
 
 phase('Converge')
 const rootCause = await agent(
-  `Synthesize these ${valid.length} adversarial investigation reports into a definitive root cause analysis.
+  `${useCkSkill('ck:debug', 'ck-debug')}
+
+Synthesize these ${valid.length} adversarial ck:debug investigations into a definitive root-cause report. Apply ck:debug's verification iron law (no completion claim without evidence).
 
 Issue: ${issue}
 
-All hypotheses:
+Hypotheses:
 ${hypothesisList.join('\n')}
 
 Investigation reports:
 ${valid.map((r, i) => `=== Investigator ${i + 1} ===\n${r}`).join('\n\n')}
 
-Produce a root cause report:
-## Root Cause
-<The surviving hypothesis with highest evidence weight. If inconclusive, say so.>
-
-## Evidence Chain
-<Step-by-step: what leads to the bug, with file:line citations>
-
-## Disproven Theories
-<Each rejected hypothesis and the key evidence that killed it>
-
-## Recommended Fix
-<Concrete, specific — file to change, what to change, why it fixes the root cause>
-
-## Verification Steps
-<How to confirm the fix works>`,
+Report: ## Root Cause / ## Evidence Chain (file:line) / ## Disproven Theories / ## Recommended Fix / ## Verification Steps`,
   { label: 'root-cause-synthesizer', phase: 'Converge' }
 )
 
-return {
-  issue,
-  hypothesesTested: hypothesisList.length,
-  investigatorsCompleted: valid.length,
-  rootCause,
-}
+return { issue, hypothesesTested: hypothesisList.length, investigatorsCompleted: valid.length, rootCause }
 ```
 
 ## Notes
 
-- Adversarial design matters: investigators who only verify their own theory miss disconfirming evidence; forcing them to challenge peers converges faster
-- `n=3` is the sweet spot — 2 is too easy to deadlock, 4+ adds noise without coverage gain
-- If all 3 return INCONCLUSIVE, the issue likely requires runtime observation (logs, profiling) — the report will say so
-- Pass `args.n = 5` for complex distributed issues (adds network/infra and data-corruption hypotheses)
+- Every agent runs the real ck:debug skill; Workflow supplies the competing hypotheses and parallel adversarial cross-examination.
+- `n=3` is the sweet spot — 2 deadlocks easily, 4+ adds noise. Use `n=5` for distributed/data-corruption issues.
+- If all return INCONCLUSIVE, ck:debug will say runtime observation (logs/profiling) is needed.
+- Requires `ck:debug` installed (`~/.claude/skills/ck-debug`).
+- Natural next step: `/man:ultraflow fix <issue>` to implement the recommended fix.

@@ -49,6 +49,21 @@ Each template is a JavaScript Workflow script (in `references/`). When invoked, 
 2. Reads the matching `references/template-<name>.md`
 3. Calls the Workflow tool with the script, passing `args`
 
+### Source of truth: the original `ck:` skills
+
+The templates are **orchestrators only** — they do not reimplement workflow logic. Every spawned agent loads and follows the corresponding original `ck:` skill verbatim (via the Skill tool, or by reading `~/.claude/skills/<dir>/SKILL.md` and its references). Workflow handles the parallel fan-out, worktree isolation, and synthesis; the `ck:` skill provides the method, gates, and output format.
+
+| Template | Delegates to | Skill dir |
+|---|---|---|
+| `scout` | `ck:scout` | `scout` |
+| `brainstorm` | `ck:brainstorm` | `brainstorm` |
+| `plan` | `research` + `ck:plan` | `research`, `ck-plan` |
+| `cook` | `ck:scout` + `ck:plan` + `ck:cook` + `ck:test` | `scout`, `ck-plan`, `cook`, `test` |
+| `fix` | `ck:fix` | `fix` |
+| `debug` | `ck:debug` | `ck-debug` |
+| `research` | `research` | `research` |
+| `review` | `ck:code-review` | `ck-code-review` |
+
 Templates that mutate files in parallel (`cook`, `fix`) run each agent in an **isolated git worktree** so there are no conflicts. After completion, merge the winning branch:
 
 ```bash
@@ -74,6 +89,7 @@ Restart Claude Code (or reload skills) and the `/man:ultraflow` command becomes 
 
 - Claude Code with the **Workflow** tool available
 - Git (for `cook` / `fix` worktree isolation)
+- The **ClaudeKit `ck:` skills** the templates delegate to (see the table above). A template degrades gracefully if its `ck:` skill is missing, but full fidelity needs them installed.
 
 ## License
 

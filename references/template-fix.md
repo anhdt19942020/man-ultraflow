@@ -1,143 +1,103 @@
 # Ultraflow — Fix Template
 
-Workflow script for parallel bug fixing. Diagnose root cause → N agents each propose a fix from a different angle → best fix applied → verified.
+Workflow script for parallel fixing. One agent runs the original **ck:fix** diagnosis (scout + root-cause) → N agents each run **ck:fix** to implement a competing fix approach in an isolated worktree → one verifier selects the best.
+
+Diagnosis discipline ("no fix without root cause"), routing, and gates are ck:fix's; Workflow races N independent fix attempts and picks the winner.
 
 ## Args
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `issue` | string | required | Bug, error message, or issue description |
-| `n` | number | 3 | Number of competing fix hypotheses |
+| `n` | number | 3 | Number of competing fix attempts |
 
 ## Workflow Script
 
 ```javascript
 export const meta = {
   name: 'ultraflow-fix',
-  description: 'Diagnose root cause then run N competing fix hypotheses, apply the best',
+  description: 'ck:fix diagnosis, then N competing ck:fix attempts in worktrees, then verify',
   phases: [
-    { title: 'Diagnose', detail: 'Root cause investigation — no fixes without diagnosis' },
-    { title: 'Fix', detail: 'N agents each implement a competing fix hypothesis' },
-    { title: 'Verify', detail: 'Evaluate fixes, select winner, verify it solves the issue' },
+    { title: 'Diagnose', detail: 'One agent runs ck:fix Scout+Diagnose (root cause, no fix yet)' },
+    { title: 'Fix', detail: 'N agents each run ck:fix to implement a distinct approach in a worktree' },
+    { title: 'Verify', detail: 'Select the best fix and state how to apply it' },
   ],
 }
 
 const issue = (args && args.issue) || 'the given issue'
 const n = (args && args.n) || 3
 
-phase('Diagnose')
+const useCkSkill = (name, dir) =>
+  `Use the ORIGINAL ${name} skill as the single source of truth — do NOT invent a different process.\n` +
+  `Load it first: call the Skill tool with skill "${name}". If the Skill tool is unavailable to you, Read ~/.claude/skills/${dir}/SKILL.md and every reference file it instructs you to load.\n` +
+  `Then follow that skill's steps, gates, and discipline EXACTLY for the work below.`
 
 const DIAGNOSIS_SCHEMA = {
   type: 'object',
   properties: {
-    root_cause: { type: 'string', description: 'The actual root cause (not the symptom)' },
-    symptom: { type: 'string', description: 'What the user observes' },
-    affected_files: {
-      type: 'array',
-      items: { type: 'object', properties: { path: { type: 'string' }, reason: { type: 'string' }, lines: { type: 'string' } }, required: ['path', 'reason'] }
-    },
-    fix_approaches: {
-      type: 'array',
-      items: { type: 'string' },
-      description: `Exactly ${n} distinct fix approaches to try in parallel`
-    },
-    confidence: { type: 'number', description: '0-100: confidence in root cause' },
-    safe_to_auto_fix: { type: 'boolean', description: 'True if fix is low-blast-radius' },
+    root_cause: { type: 'string' },
+    affected_files: { type: 'array', items: { type: 'string' } },
+    fix_approaches: { type: 'array', items: { type: 'string' }, description: `Exactly ${n} distinct approaches` },
+    confidence: { type: 'number' },
   },
-  required: ['root_cause', 'symptom', 'affected_files', 'fix_approaches', 'confidence', 'safe_to_auto_fix'],
+  required: ['root_cause', 'affected_files', 'fix_approaches', 'confidence'],
 }
 
+phase('Diagnose')
 const diagnosis = await agent(
-  `Diagnose the root cause of this issue: ${issue}
+  `${useCkSkill('ck:fix', 'fix')}
 
-RULES:
-- Find root cause, NOT just the symptom
-- Read actual source files — do not guess
-- Trace the error backward through the call stack
-- Check: recent changes, dependencies, environment, data flow
+Run ONLY the ck:fix Scout + Diagnose steps (Steps 1-2) for: ${issue}
+Do NOT implement a fix yet — honor ck:fix's HARD-GATE (no fix before root cause).
 
-Return:
-1. Root cause (the actual broken invariant/logic, not the error message)
-2. Symptom (what user sees)
-3. Affected files with paths and line numbers
-4. Exactly ${n} distinct fix approaches ordered from simplest to most invasive
-5. Confidence score (0-100)
-6. Whether this is safe to auto-fix (low blast radius = no breaking changes, no schema changes)`,
+Return: the root cause, affected files (path), exactly ${n} distinct fix approaches (simplest → most invasive), and your confidence (0-100).`,
   { label: 'diagnoser', phase: 'Diagnose', schema: DIAGNOSIS_SCHEMA }
 )
 
-if (!diagnosis || diagnosis.confidence < 50) {
-  log('Low confidence diagnosis — expanding investigation')
-}
-
-const approaches = (diagnosis && diagnosis.fix_approaches) || Array.from({ length: n }, (_, i) => `Fix approach ${i + 1} for: ${issue}`)
-log(`Root cause identified: ${diagnosis && diagnosis.root_cause}`)
-log(`Spawning ${approaches.length} parallel fix agents`)
+const approaches = (diagnosis && diagnosis.fix_approaches) || Array.from({ length: n }, (_, i) => `fix approach ${i + 1}`)
+log(`Root cause: ${diagnosis && diagnosis.root_cause} — spawning ${Math.min(n, approaches.length)} fix attempts`)
 
 phase('Fix')
-
-const fixResults = await parallel(
+const fixes = await parallel(
   approaches.slice(0, n).map((approach, i) => () =>
     agent(
-      `Implement fix for: ${issue}
+      `${useCkSkill('ck:fix', 'fix')}
 
-Root cause: ${diagnosis && diagnosis.root_cause}
-Approach ${i + 1}: ${approach}
+The diagnosis is already done (reuse it — do NOT re-diagnose):
+- Root cause: ${diagnosis && diagnosis.root_cause}
+- Affected files: ${(diagnosis && diagnosis.affected_files || []).join(', ')}
 
-Affected files:
-${diagnosis && diagnosis.affected_files ? diagnosis.affected_files.map(f => `- ${f.path}${f.lines ? ':' + f.lines : ''} — ${f.reason}`).join('\n') : 'See diagnosis'}
+Implement the fix for: ${issue}
+Use THIS approach (approach ${i + 1}): ${approach}
 
-RULES:
-- Fix the ROOT CAUSE, not the symptom
-- Minimal change — do not refactor unrelated code
-- Preserve all public contracts (signatures, return types, API shapes)
-- If approach requires breaking changes, state them explicitly and STOP without modifying files
-- After implementing, describe exactly what changed and why
-
-Return: what you changed (file:line), why it fixes the root cause, any side effects or risks.`,
+Follow ck:fix's implementation + verification discipline. Fix the root cause, keep the change minimal, preserve public contracts. Commit with a conventional message. Report what changed (file:line), why it fixes the root cause, and any risks.`,
       { label: `fix-${i + 1}`, phase: 'Fix', isolation: 'worktree' }
     ).then(result => ({ approach, result, index: i + 1 }))
   )
 )
 
-const completedFixes = fixResults.filter(Boolean)
-log(`${completedFixes.length}/${n} fix attempts completed`)
+const done = fixes.filter(Boolean)
+log(`${done.length}/${n} fix attempts completed`)
 
 phase('Verify')
-
 const verification = await agent(
-  `Evaluate and select the best fix for: ${issue}
+  `Select the best fix for: ${issue}
 
-Original diagnosis:
-- Root cause: ${diagnosis && diagnosis.root_cause}
-- Affected files: ${diagnosis && diagnosis.affected_files ? diagnosis.affected_files.map(f => f.path).join(', ') : 'unknown'}
+Root cause: ${diagnosis && diagnosis.root_cause}
 
-Fix attempts:
-${completedFixes.map(f => `=== Fix ${f.index} (${f.approach}) ===\n${f.result}`).join('\n\n')}
+Attempts:
+${done.map(f => `=== Fix ${f.index} (${f.approach}) ===\n${f.result}`).join('\n\n')}
 
-Evaluate each fix:
-1. Does it address the ROOT CAUSE (not just symptom)?
-2. Does it introduce any regressions or side effects?
-3. Is it minimal (no unnecessary changes)?
-4. Does it preserve all public contracts?
-
-Select the best fix. If multiple are equivalent, prefer the simplest.
-State: which fix won, why, and what the user should do to apply it (git commands or file edits needed).`,
+Evaluate each (addresses root cause? regressions? minimal? contracts preserved?). Pick the winner (prefer simplest when equivalent). State which fix won, why, and the exact git commands / edits to apply it (which worktree branch to merge).`,
   { label: 'verifier', phase: 'Verify' }
 )
 
-return {
-  issue,
-  diagnosis,
-  fixes: completedFixes.length,
-  verification,
-}
+return { issue, diagnosis, attempts: done.length, verification }
 ```
 
 ## Notes
 
-- `isolation: 'worktree'` means each fix agent works in its own git branch — no conflicts
-- After Workflow completes: check `git worktree list`, merge the winning branch
-- The verifier evaluates fix quality, NOT just "did tests pass" — tests passing on a symptom fix is a false positive
-- If `diagnosis.safe_to_auto_fix` is false, present fix to user before merging
-- Default `n=3` competing hypotheses is the sweet spot; `n=2` for simple bugs, `n=4` for deep/systemic issues
+- Diagnosis runs ck:fix once (root cause is shared); the N attempts skip re-diagnosis and only differ in approach.
+- `isolation: 'worktree'` keeps the competing fixes on separate branches — no conflicts. After completion: `git worktree list`, then merge the winning branch.
+- Requires `ck:fix` installed (`~/.claude/skills/fix`).
+- Default `n=3`; `n=2` for trivial bugs, `n=4` for systemic issues.

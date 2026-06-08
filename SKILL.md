@@ -15,6 +15,23 @@ metadata:
 
 Run parallel agents via the **Workflow tool** (no env var, works on Sonnet/Opus).
 
+## Source of Truth: the original ck: skills
+
+Each template is **only an orchestrator**. The actual workflow logic is NOT reimplemented here — every spawned agent loads and follows the original ck: skill verbatim (via the Skill tool, or by reading `~/.claude/skills/<dir>/SKILL.md` + its references). Workflow's job is the parallel fan-out, worktree isolation, and synthesis; the ck: skill's job is the method, gates, and output format.
+
+| Template | Delegates to ck: skill | Skill dir |
+|---|---|---|
+| `scout` | `ck:scout` | `scout` |
+| `brainstorm` | `ck:brainstorm` | `brainstorm` |
+| `plan` | `research` + `ck:plan` | `research`, `ck-plan` |
+| `cook` | `ck:scout` + `ck:plan` + `ck:cook` + `ck:test` | `scout`, `ck-plan`, `cook`, `test` |
+| `fix` | `ck:fix` | `fix` |
+| `debug` | `ck:debug` | `ck-debug` |
+| `research` | `research` | `research` |
+| `review` | `ck:code-review` | `ck-code-review` |
+
+**Dependency:** these templates require the listed ck: skills to be installed (ClaudeKit). If a ck: skill is missing, that template degrades to whatever the agent can do without it.
+
 ## Usage
 
 ```
@@ -67,14 +84,14 @@ Extract the JS code block from the reference file verbatim. The only substitutio
 ## Typical Workflow Chain
 
 ```
-/ultraflow scout <target>         → understand codebase
-/ultraflow brainstorm <topic>     → explore solution options
-/ultraflow plan <task> --mode hard → create phased plan
-/ultraflow cook <plan-path>       → parallel implementation
-/ultraflow fix <issue>            → diagnose + fix bugs
-/ultraflow debug <issue>          → deep root cause investigation
-/ultraflow review <scope>         → code quality audit
-/ultraflow research <topic>       → external knowledge gathering
+/man:ultraflow scout <target>          → understand codebase
+/man:ultraflow brainstorm <topic>      → explore solution options
+/man:ultraflow plan <task> --mode hard → create phased plan
+/man:ultraflow cook <plan-path>        → parallel implementation
+/man:ultraflow fix <issue>             → diagnose + fix bugs
+/man:ultraflow debug <issue>           → deep root cause investigation
+/man:ultraflow review <scope>          → code quality audit
+/man:ultraflow research <topic>        → external knowledge gathering
 ```
 
 ## After Workflow completes
