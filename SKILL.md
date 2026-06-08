@@ -1,14 +1,14 @@
 ---
 name: man:ultraflow
-description: "Multi-agent Workflow orchestration with ready-made templates. Runs parallel agents via Workflow engine (no env var needed, works on Sonnet). Templates: scout (parallel codebase search), brainstorm (N angles → synthesis), plan (research → phased plan), cook (scout→plan→parallel devs→test), fix (N competing hypotheses), debug (adversarial hypotheses), research (N researchers → synthesis), review (security/perf/coverage → merged findings). Usage: /man:ultraflow <template> <args>. Trigger on: 'parallel agents', 'ultraflow', 'multi-agent workflow', 'run agents in parallel'."
+description: "Multi-agent Workflow orchestration with ready-made templates. Runs parallel agents via Workflow engine (no env var needed, works on Sonnet). Templates: arena (router auto-picks ck: skills then PRODUCE→adversarial CONTEST→JUDGE), scout (parallel codebase search), brainstorm (N angles → synthesis), plan (research → phased plan), cook (scout→plan→parallel devs→test), fix (N competing hypotheses), debug (adversarial hypotheses), research (N researchers → synthesis), review (security/perf/coverage → merged findings). Usage: /man:ultraflow <template> <args> or /man:ultraflow --arena <prompt>. Trigger on: 'parallel agents', 'ultraflow', 'multi-agent workflow', 'run agents in parallel', 'adversarial', 'đối kháng'."
 user-invocable: true
 when_to_use: "Invoke when the user wants parallel multi-agent execution using the Workflow engine."
 category: dev-tools
-keywords: [workflow, parallel, multi-agent, research, review, pipeline, plan, brainstorm, scout, fix, debug]
-argument-hint: "<template> <args> [--agents N]"
+keywords: [workflow, parallel, multi-agent, research, review, pipeline, plan, brainstorm, scout, fix, debug, arena, adversarial]
+argument-hint: "<template> <args> [--agents N] OR --arena <prompt>"
 metadata:
   author: user
-  version: "3.0.0"
+  version: "4.0.0"
 ---
 
 # Ultraflow — Parallel Agent Workflows
@@ -21,6 +21,7 @@ Each template is **only an orchestrator**. The actual workflow logic is NOT reim
 
 | Template | Delegates to ck: skill | Skill dir |
 |---|---|---|
+| `arena` | **router-decided** (cook+code-review+test / plan+predict / fix+debug / …) | router picks |
 | `scout` | `ck:scout` | `scout` |
 | `brainstorm` | `ck:brainstorm` | `brainstorm` |
 | `plan` | `ck:research` + `ck:plan` | `research`, `ck-plan` |
@@ -35,6 +36,7 @@ Each template is **only an orchestrator**. The actual workflow logic is NOT reim
 ## Usage
 
 ```
+/man:ultraflow --arena <prompt> [--agents N]   ← router auto-picks ck: skills + adversaries
 /man:ultraflow scout <target> [--agents N]
 /man:ultraflow brainstorm <topic> [--agents N]
 /man:ultraflow plan <task> [--agents N] [--mode fast|hard|deep]
@@ -55,6 +57,7 @@ When invoked, IMMEDIATELY:
 
 | Template | Reference file | Args shape | Default N |
 |---|---|---|---|
+| `arena` | `references/template-arena.md` | `{ prompt, n? }` | router |
 | `scout` | `references/template-scout.md` | `{ target, n }` | 3 |
 | `brainstorm` | `references/template-brainstorm.md` | `{ topic, n }` | 3 |
 | `plan` | `references/template-plan.md` | `{ task, n, mode? }` | 2 |
@@ -64,7 +67,8 @@ When invoked, IMMEDIATELY:
 | `research` | `references/template-research.md` | `{ topic, n }` | 3 |
 | `review` | `references/template-review.md` | `{ scope, n }` | 3 |
 
-**`--agents N` flag** → pass as `args.n`.
+**`--arena` flag** → run the `arena` template; pass everything after it as `args.prompt`. The router auto-picks the producer + adversary ck: skills and agent count. Example: `/man:ultraflow --arena "Add absence column to ticket"` → `Workflow({ script: <arena script>, args: { prompt: "Add absence column to ticket" } })`.
+**`--agents N` flag** → pass as `args.n` (in arena, overrides the router's count, clamped 2-4).
 **`--plan <path>` flag** (cook only) → pass as `args.planPath` to skip scout+plan phases.
 **`--mode fast|hard|deep` flag** (plan only) → pass as `args.mode` (default: `fast`).
 
@@ -97,6 +101,7 @@ Extract the JS code block from the reference file verbatim. The only substitutio
 ## After Workflow completes
 
 - Report results to user in clean markdown
+- `arena`: routed intent + producer/contesters used + JUDGE verdict (ACCEPT/REVISE/REJECT) + prioritized required actions; if files were mutated, remind to merge the worktree branch
 - `scout`: context map with file table + patterns + contracts + risks
 - `brainstorm`: synthesis with winner, trade-offs, next steps
 - `plan`: plan document path + phase summary; save to `./plans/`

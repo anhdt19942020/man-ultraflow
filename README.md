@@ -8,6 +8,7 @@ Multi-agent **Workflow** orchestration for Claude Code — run parallel agents t
 
 | Template | What it does | Default agents |
 |---|---|---|
+| `arena` | **Router auto-picks** the producer ck: skill + adversary ck: skill(s) from your prompt, then PRODUCE → adversarial CONTEST → JUDGE | router (2-3) |
 | `scout` | Parallel codebase search across 4 dimensions (files, patterns, contracts, risks) → merged context map | 3 |
 | `brainstorm` | N agents propose solutions from distinct angles → judge panel → synthesis | 3 |
 | `plan` | Scout + N parallel researchers → planner synthesizes a phased plan (`--mode fast\|hard\|deep`) | 2 |
@@ -20,6 +21,7 @@ Multi-agent **Workflow** orchestration for Claude Code — run parallel agents t
 ## Usage
 
 ```
+/man:ultraflow --arena <prompt> [--agents N]   ← router auto-picks ck: skills + adversaries
 /man:ultraflow scout <target> [--agents N]
 /man:ultraflow brainstorm <topic> [--agents N]
 /man:ultraflow plan <task> [--agents N] [--mode fast|hard|deep]
