@@ -41,7 +41,7 @@ export const meta = {
   phases: [
     { title: 'Tuyển binh', detail: 'Lanista đọc prompt → chọn Gladiator (producer), Challengers (contesters), số agent + mục tiêu công kích' },
     { title: 'Ra trận', detail: 'Gladiator chạy ck: skill được chọn để tạo sản phẩm' },
-    { title: 'Giao chiến', detail: 'N Challengers, mỗi người chạy một ck: skill để công kích sản phẩm' },
+    { title: 'Giao chiến', detail: 'N Challengers, mỗi người công kích theo một góc/giả thuyết riêng (contest_angles) — khác skill hoặc khác giả thuyết' },
     { title: 'Phán quyết', detail: 'Caesar phân xử: ÂN XÁ (ACCEPT) / TÁI ĐẤU (REVISE) / KHAI TỬ (REJECT) + việc cần làm' },
   ],
 }
@@ -173,7 +173,7 @@ const critiques = await parallel(
       agent(
         `${useCkSkill(adv.name, adv.dir)}
 
-You are CHALLENGER #${i + 1} of ${n}, wielding the ${adv.name} skill as your weapon. Your job: ATTACK the artifact below produced for this task — assume it is flawed until proven otherwise. Use your ${adv.name} skill as the tool to find concrete faults. When other challengers share your weapon, attack from an angle distinct to your index (challenger-${i + 1}) — breadth across challengers beats duplicated objections.
+You are CHALLENGER #${i + 1} of ${n}, wielding the ${adv.name} skill as your weapon. Your job: ATTACK the artifact below produced for this task — assume it is flawed until proven otherwise. Use your ${adv.name} skill as the tool to find concrete faults.${contestAngles[i] ? ` Your ASSIGNED angle of attack is: "${contestAngles[i]}" — commit to it, go deep, and stay in your lane; do not duplicate the other challengers' angles. Breadth across challengers beats overlapping objections.` : ` When other challengers share your weapon, attack from an angle distinct to your index (challenger-${i + 1}) — breadth across challengers beats duplicated objections.`}
 
 Original task: ${prompt}
 
@@ -234,6 +234,7 @@ return {
   producerModel: route.producer_model,
   contesters: route.contesters.map(c => c.name),
   contesterModels,
+  contestAngles,
   judgeModel: route.judge_model,
   agents: n,
   mutatedFiles: route.mutates_files,
@@ -247,7 +248,8 @@ return {
 - **Trigger:** `/man:ultraflow --arena "<prompt>"` (or `arena <prompt>`). The Lanista decides everything else.
 - **`--agents N`** overrides the Lanista's challenger count (clamped 2-4).
 - **Auto model selection:** the Lanista assigns a model tier per agent (opus/sonnet/haiku) based on task complexity, and diversifies the challengers' models so different tiers catch different faults. Invalid/missing tiers fall back to the inherited session model (safe). The `agent()` `model` option is what makes this work.
-- **Challenger labels keep their weapon:** each challenger is labelled `challenger-<N>-<skill>` (e.g. `challenger-1-code-review`, `challenger-2-test`) — the number tells them apart, the skill suffix shows what each is actually doing.
+- **Challenger labels keep their weapon:** each challenger is labelled `challenger-<N>-<skill>` (e.g. `challenger-1-code-review`, `challenger-2-security`, `challenger-3-test`) — the number tells them apart, the skill suffix shows what each is actually doing.
+- **Distinct attack angles (`contest_angles`):** adversarial value comes from non-overlapping angles, so the Lanista assigns each challenger one concrete angle. The mechanism matches the intent type: **artifact-producing** intents (implement/fix/review) diversify by *skill* — e.g. `implement` runs 3 lenses (code-review = logic/contracts, security = exploitable holes, test = coverage/regressions); **investigation** intents (debug/research) reuse one skill but diversify by *hypothesis* — each `ck:debug` investigator chases a different concrete root-cause lead, each `ck:research` verifier a different angle (one seeking disconfirming sources). If the Lanista omits an angle, that challenger falls back to the generic "distinct angle by index" instruction.
 - The adversarial structure lives entirely here; every agent still uses the original ck: skills as tools — ck: is never modified.
 - If the Gladiator mutated files (`ck:cook` / `ck:fix`), it ran in an isolated worktree and only the branch NAME is returned (`branch` field) — the worktree PATH is not, so resolve it at runtime with `git worktree list` (filter by the branch) before any `git worktree remove`. Merge depends on Caesar's verdict: on **ACCEPT** merge as-is (`git merge <branch>`); on **REVISE** apply the required actions first, then merge; on **REJECT** discard (resolve conflicts manually). If `mutatedFiles` is true but `branch` is null (Gladiator dropped the `BRANCH:` footer), recover it via `git worktree list`.
 - **Post-verdict "ending":** after reporting the verdict, follow the closing protocol in `SKILL.md` → "Arena ending (post-verdict next steps)". Engine caveats it relies on: (1) round count = the returned `round` field (parsed from the prompt's `[TÁI ĐẤU vòng N]` tag — the engine is stateless between calls); (2) a follow-up `--arena` prompt MUST anchor the original intent (`[TÁI ĐẤU vòng <N+1> — intent: <intent>] …`) so the Lanista does not re-route to a different (mutating) producer; (3) there is no `--branch` arg — "same branch" is advisory, a mutating re-run may create a NEW branch.
