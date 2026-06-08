@@ -75,17 +75,74 @@ git merge <branch>
 
 ## Installation
 
-Copy this folder into your Claude Code skills directory:
+The skill **is** this repository (`SKILL.md` lives at the root), so installing it means placing the repo at `<skills-dir>/man-ultraflow`. Pick a scope:
+
+- **Global** — available in every project: `~/.claude/skills/man-ultraflow`
+- **Project-local** — only this project, commit it with the repo: `.claude/skills/man-ultraflow`
+
+### Option A — git clone (recommended, easy updates)
+
+**macOS / Linux**
 
 ```bash
 # global
-git clone git@github.com:anhdt19942020/man-ultraflow.git ~/.claude/skills/man-ultraflow
+git clone https://github.com/anhdt19942020/man-ultraflow.git ~/.claude/skills/man-ultraflow
 
-# or project-local
-git clone git@github.com:anhdt19942020/man-ultraflow.git .claude/skills/man-ultraflow
+# or project-local (run from your project root)
+git clone https://github.com/anhdt19942020/man-ultraflow.git .claude/skills/man-ultraflow
 ```
 
-Restart Claude Code (or reload skills) and the `/man:ultraflow` command becomes available.
+**Windows (PowerShell)**
+
+```powershell
+# global
+git clone https://github.com/anhdt19942020/man-ultraflow.git "$env:USERPROFILE\.claude\skills\man-ultraflow"
+
+# or project-local (run from your project root)
+git clone https://github.com/anhdt19942020/man-ultraflow.git ".claude\skills\man-ultraflow"
+```
+
+> Using SSH instead of HTTPS? Swap the URL for `git@github.com:anhdt19942020/man-ultraflow.git`.
+
+### Option B — manual download (no git)
+
+Download the repo ZIP from GitHub (**Code → Download ZIP**), then extract it so the layout is:
+
+```
+~/.claude/skills/man-ultraflow/
+├── SKILL.md
+├── README.md
+└── references/
+```
+
+The folder **must** be named `man-ultraflow` and `SKILL.md` must sit directly inside it.
+
+### Activate
+
+Restart Claude Code (or reload skills). The `/man:ultraflow` command is now available.
+
+### Verify
+
+```bash
+# the skill manifest should print "name: man:ultraflow"
+cat ~/.claude/skills/man-ultraflow/SKILL.md | head -3
+```
+
+Then in Claude Code, run `/man:ultraflow scout README.md` — if the workflow launches, you're set.
+
+### Update
+
+```bash
+cd ~/.claude/skills/man-ultraflow && git pull
+```
+
+(Manual installs: re-download the ZIP and overwrite the folder.)
+
+### Uninstall
+
+```bash
+rm -rf ~/.claude/skills/man-ultraflow
+```
 
 ## Requirements
 
