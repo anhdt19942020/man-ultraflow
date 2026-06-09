@@ -99,7 +99,7 @@ const ROUTE_SCHEMA = {
     },
     n_agents: { type: 'number', minimum: 2, maximum: 4, description: 'number of contest agents, 2-3 (hard cap 4)' },
     contest_targets: { type: 'array', items: { type: 'string' }, description: 'what the adversaries must attack' },
-    contest_angles: { type: 'array', items: { type: 'string' }, description: 'one concrete attack angle per contest agent (length = n_agents), ALL DISTINCT. For same-skill investigation intents (debug/research), each is a DISTINCT hypothesis (e.g. "race condition on shared cache", "stale config not reloaded", "off-by-one in pagination"). For different-skill contests, each names that challenger skill\'s lens (e.g. "logic/correctness", "exploitability", "test coverage & regressions").' },
+    contest_angles: { type: 'array', items: { type: 'string' }, description: 'one concrete attack angle per contest agent (length = n_agents), ALL DISTINCT. For same-skill investigation intents (debug/research), each is a DIFFERENT concrete hypothesis (e.g. "race condition on shared cache", "stale config not reloaded", "off-by-one in pagination"). For different-skill contests, each names that challenger skill\'s lens (e.g. "logic/correctness", "exploitability", "test coverage & regressions").' },
     complexity: { type: 'string', enum: ['low', 'medium', 'high'], description: 'reasoning difficulty of this task' },
     producer_model: { type: 'string', enum: ['opus', 'sonnet', 'haiku'], description: 'model tier for the producer' },
     judge_model: { type: 'string', enum: ['opus', 'sonnet', 'haiku'], description: 'model tier for the judge' },
@@ -122,7 +122,7 @@ Return the producer ck: skill (+dir), whether it mutates files, the concrete del
 N (number of contest agents): follow the row's N. For 'implement' use exactly 3 (one challenger per lens: code-review, security, test). For 'fix', add ck:test as a 3rd contester ONLY when the fix touches logic (else keep 2). For debug/research the diversity comes from the hypotheses, not the skill — keep the single skill but set n=3 (debug) / 2-3 (research).
 
 ALSO produce contest_angles — exactly n_agents concrete attack angles, one per challenger, ALL DISTINCT:
-- Different-skill contests (implement, review, fix): each angle names the lens of that challenger's skill, IN THE SAME ORDER as the contesters list (e.g. contesters [code-review, security, test] → angles ["logic/correctness & broken contracts", "exploitable input/auth/storage holes", "missing tests & regressions"]; for plan intent: contesters [predict, scenario] → angles ["probability-weighted failure modes & timeline risks", "concrete edge-case & adversarial scenarios that break the plan"]).
+- Different-skill contests (implement, review, fix): each angle names the lens of that challenger's skill, IN THE SAME ORDER as the contesters list (e.g. contesters [code-review, security, test] → angles ["logic/correctness & broken contracts", "exploitable input/auth/storage holes", "missing tests & regressions"]; for plan intent: contesters [predict, scenario] → angles ["probability-weighted failure modes & timeline risks", "concrete edge-case & adversarial scenarios that break the plan"]; for fix intent: contesters [debug, code-review, test] → angles ["verify the stated root cause is correct & the fix actually addresses it", "regressions & contract breaks introduced by the fix itself", "fix coverage — is the fix tested, and are untested edge paths exposed"]).
 - Same-skill investigation (debug, research): each angle is a DIFFERENT concrete hypothesis/lead to chase — do NOT leave them generic. For research, make one angle explicitly seek disconfirming evidence.
 
 ALSO auto-assign a MODEL tier per agent based on reasoning difficulty:
@@ -236,7 +236,7 @@ Contest targets (attack these specifically): ${route.contest_targets.join('; ')}
 
 Rules:
 - Every objection MUST cite concrete evidence (file:line, a specific claim, a reproducible scenario). No vague "could be better".
-- Rate each objection: **BLOCKER** (breaks correctness, security, or CI — must fix before ship) / **MAJOR** (degrades reliability or quality but does not block) / **MINOR** (style, cleanup, nice-to-have).
+- Rate each objection: **BLOCKER** (breaks correctness, security, or CI — demonstrated by a failing test, a concrete exploit path with reproduction steps, or a specific code trace that shows the failure; theoretical risks that are not yet proven are MAJOR, not BLOCKER) / **MAJOR** (credible risk that degrades reliability or quality but is not yet demonstrated to break) / **MINOR** (style, cleanup, nice-to-have).
 - If you genuinely find nothing in your area, say so explicitly (do not invent issues).
 
 Report: ## Objections (rated, with evidence) / ## What holds up / ## Verdict (artifact is: SOUND / NEEDS-REVISION / REJECT)`,
@@ -336,7 +336,7 @@ ${digestedCritiques.join('\n\n')}
 ${benchMetrics ? `\nObjective benchmark metrics (real numbers from the current branch — treat test failures as hard blockers regardless of challenger opinions):\n${benchMetrics}` : ''}
 
 Rule:
-1. **Verdict** (the thumb): ACCEPT (ÂN XÁ — ship as-is) / REVISE (TÁI ĐẤU — fix listed items first) / REJECT (KHAI TỬ — approach is wrong, not just flawed). Decision rule: choose ACCEPT when no upheld BLOCKER/MAJOR exists; REVISE when BLOCKERs/MAJORs are real but addressable with targeted fixes (same approach, patched); REJECT only when the core approach or architecture must be abandoned — not merely because there are several BLOCKERs. Output the canonical token ACCEPT/REVISE/REJECT so downstream tooling can parse it.
+1. **Verdict** (the thumb): ACCEPT (ÂN XÁ — ship as-is) / REVISE (TÁI ĐẤU — fix listed items first) / REJECT (KHAI TỬ — approach is wrong, not just flawed). Decision rule: (0) if benchmark metrics show TESTS_FAILED > 0 or LINT_ERRORS > 0, rule REVISE or REJECT regardless of challenger verdicts — hard numbers override soft opinions; (1) choose ACCEPT when no upheld BLOCKER/MAJOR exists and metrics are clean; (2) REVISE when BLOCKERs/MAJORs are real but addressable with targeted fixes (same approach, patched); (3) REJECT only when the core approach or architecture must be abandoned — not merely because there are several BLOCKERs. Output the canonical token ACCEPT/REVISE/REJECT so downstream tooling can parse it.
 2. **Upheld objections**: which BLOCKER/MAJOR objections are real (dismiss any that are wrong or non-issues — say why)
 3. **Required actions** (numbered, prioritized): exactly what to fix, where, how
 4. **One-line bottom line**
