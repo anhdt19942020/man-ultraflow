@@ -189,24 +189,30 @@ if (route.mutates_files && typeof artifact === 'string' && artifact.split('\n').
     `Compress this code artifact for adversarial review. Extract: function signatures, key logic changes, public API surface, changed imports. Keep under 30% of original length. Challengers will read the full code from the working directory for BLOCKER-level findings.\n\n${artifact}`,
     { label: 'compressor', phase: 'Ra trận' }
   )
-  challengerArtifact = digest || artifact // fallback to full on compressor failure
-  if (digest) log(`📦 Artifact compressed for challengers: ${artifact.split('\n').length} → ~${digest.split('\n').length} lines`)
+  // Length guard: reject digest if shorter than 10% of original (likely a misleading summary)
+  const digestUsable = digest && digest.length > artifact.length * 0.10
+  challengerArtifact = digestUsable ? digest : artifact
+  if (digestUsable) {
+    log(`📦 Artifact compressed for challengers: ${artifact.split('\n').length} → ~${digest.split('\n').length} lines`)
+  } else if (digest) {
+    log(`⚠️ Compressor output too short (${digest.length}/${artifact.length} chars, <10%) — using full artifact`)
+  }
 }
 
 // P9: Pre-computed diff context for challengers on mutating intents.
-// Passes structured diff to challengers so they skip independent file discovery.
+// Uses agent() (engine primitive) instead of Bash() which is not available in Workflow scripts.
 let diffContext = ''
 if (route.mutates_files) {
-  try {
-    const diff = await Bash('git diff HEAD~1 --stat && echo "---DIFF---" && git diff HEAD~1', { timeout: 15000 })
-    if (diff && diff.length < 20000) {
-      // Truncate raw diff to 500 lines max to avoid bloating challenger prompts
-      const diffLines = diff.split('\n')
-      diffContext = diffLines.length > 500
-        ? diffLines.slice(0, 500).join('\n') + '\n... (truncated, ' + diffLines.length + ' total lines)'
-        : diff
-    }
-  } catch (e) { /* diff unavailable — challengers will discover changes independently */ }
+  const diff = await agent(
+    'Run `git diff HEAD~1 --stat` followed by `git diff HEAD~1`. Return ONLY the raw output, no commentary. If diff is unavailable, return empty string.',
+    { label: 'diff-fetcher', phase: 'Ra trận', model: 'haiku' }
+  )
+  if (diff && diff.length < 20000) {
+    const diffLines = diff.split('\n')
+    diffContext = diffLines.length > 500
+      ? diffLines.slice(0, 500).join('\n') + '\n... (truncated, ' + diffLines.length + ' total lines)'
+      : diff
+  }
 }
 
 // P5: Parallel benchmarker + challengers — run Đo lường in parallel with Giao chiến
@@ -276,7 +282,9 @@ if (benchMetrics) {
   log(`📊 Benchmark: ${summary}`)
 }
 
-const valid = critiques.filter(Boolean)
+// Index-preserving filter: track original index so contestAngles[idx] and route.contesters[idx] stay aligned
+const indexed = critiques.map((c, i) => c ? { report: c, idx: i } : null).filter(Boolean)
+const valid = indexed.map(x => x.report)
 log(`${valid.length}/${n} Challengers đã giao chiến`)
 
 if (valid.length === 0) {
@@ -286,7 +294,12 @@ if (valid.length === 0) {
 
 // P2: Unanimity pre-digest — when ALL challengers verdict SOUND and benchmarks are clean,
 // prepend a note so Caesar can deliberate faster (but still reads every report).
-const allSound = valid.every(c => /SOUND/i.test(c))
+// Extract verdict section and test with word boundary + negative exclusion to avoid "UNSOUND"/"NOT SOUND" false positives
+const isSoundVerdict = (c) => {
+  const vs = c.match(/##\s*Verdict[\s\S]*/i)?.[0] || c.slice(-500)
+  return /\bSOUND\b/i.test(vs) && !/UNSOUND|NOT\s+SOUND|NEEDS-REVISION|REJECT/i.test(vs)
+}
+const allSound = valid.every(c => isSoundVerdict(c))
 const benchClean = !benchMetrics || (/TESTS_FAILED:\s*0/.test(benchMetrics) && /LINT_ERRORS:\s*0/.test(benchMetrics))
 const unanimityNote = (allSound && benchClean)
   ? `\nNOTE: All ${valid.length} challengers independently verdicted SOUND and benchmarks are clean. This increases prior probability of ACCEPT — but Caesar must still verify each challenger cited exhaustive evidence of what they checked, not just a SOUND token without citation.\n`
@@ -295,17 +308,16 @@ const unanimityNote = (allSound && benchClean)
 // P4+DAR: Diversity-aware challenger digest for Caesar.
 // Compress SOUND challengers to stubs; for non-SOUND, retain BLOCKER/MAJOR + verdict only.
 // DAR insight: retain disagreements (maximally informative), compress agreements (redundant).
-const digestedCritiques = valid.map((c, i) => {
-  const isSound = /##\s*Verdict[\s\S]*?SOUND/i.test(c) || (/SOUND/i.test(c) && !/BLOCKER|MAJOR/i.test(c))
+const digestedCritiques = indexed.map(({ report: c, idx }, i) => {
+  const isSound = isSoundVerdict(c) && !/BLOCKER|MAJOR/i.test(c)
   if (isSound) {
-    const angle = contestAngles[i] || `challenger-${i + 1}`
-    return `Challenger ${i + 1}: SOUND — exhaustively checked "${angle}", found no objections.`
+    const angle = contestAngles[idx] || `challenger-${idx + 1}`
+    return `Challenger ${idx + 1}: SOUND — exhaustively checked "${angle}", found no objections.`
   }
-  // For non-SOUND challengers: keep full BLOCKER/MAJOR objections + verdict, drop MINOR-only sections
-  const blockerMajor = (c.match(/[-*]\s*\*\*(BLOCKER|MAJOR)\*\*[\s\S]*?(?=[-*]\s*\*\*(?:BLOCKER|MAJOR|MINOR)\*\*|##|$)/gi) || []).join('\n')
+  const blockerMajor = (c.match(/(?:[-*]|\d+\.)\s*\*\*(BLOCKER|MAJOR)\*\*[\s\S]*?(?=(?:[-*]|\d+\.)\s*\*\*(?:BLOCKER|MAJOR|MINOR)\*\*|##|$)/gi) || []).join('\n')
   const verdictSection = c.match(/##\s*Verdict[\s\S]*?(?=##|$)/i)?.[0] || ''
-  const advName = route.contesters[i % route.contesters.length]?.name || `challenger-${i + 1}`
-  return `Challenger ${i + 1} (${advName}):\n${blockerMajor || '(no BLOCKER/MAJOR objections extracted — see full report)'}\n${verdictSection.trim()}`
+  const advName = route.contesters[idx % route.contesters.length]?.name || `challenger-${idx + 1}`
+  return `Challenger ${idx + 1} (${advName}):\n${blockerMajor || '(no BLOCKER/MAJOR objections extracted — see full report)'}\n${verdictSection.trim()}`
 })
 
 phase('Phán quyết')
@@ -344,7 +356,8 @@ After your full reasoning, append a JSON block (do not truncate your reasoning t
 )
 
 // P3: Extract structured verdict JSON from Caesar's hybrid output (free-text + JSON block)
-const jsonMatch = verdict && verdict.match(/```json\n([\s\S]*?)\n```/)
+// Match LAST json code block (Caesar may quote JSON examples before the verdict block)
+const jsonMatch = verdict && (() => { const m = Array.from(verdict.matchAll(/```json\s*\n([\s\S]*?)\n?\s*```/g)); return m.length ? m[m.length - 1] : null })()
 const structuredVerdict = jsonMatch ? (() => { try { return JSON.parse(jsonMatch[1]) } catch (e) { return null } })() : null
 
 return {
@@ -379,7 +392,7 @@ return {
 - **Post-verdict "ending":** after reporting the verdict, follow the closing protocol in `SKILL.md` → "Arena ending (post-verdict next steps)". Engine caveats: (1) round count = the returned `round` field (parsed from the prompt's `[TÁI ĐẤU vòng N]` tag — the engine is stateless between calls); (2) a follow-up `--arena` prompt MUST anchor the original intent (`[TÁI ĐẤU vòng <N+1> — intent: <intent>] …`) so the Lanista does not re-route to a different producer.
 - **Parallel Giao chiến + Đo lường (P5):** challengers and benchmarker now run in parallel for mutating intents. The benchmarker reads the branch independently — no dependency on challenger output. Saves 20-30% wall-clock time on mutating runs.
 - **Artifact digest (P1):** for mutating intents with large artifacts (>150 lines), a compressor agent generates a digest before distributing to challengers. Challengers receive the digest; Caesar always receives the full artifact. Non-mutating intents skip compression entirely. Graceful fallback to full artifact on compressor failure.
-- **Pre-computed diff context (P9):** for mutating intents, `git diff HEAD~1` output is pre-computed and included in challenger prompts so they skip independent file discovery. Truncated to 500 lines max.
+- **Pre-computed diff context (P9):** for mutating intents, a haiku agent runs `git diff HEAD~1` and includes output in challenger prompts so they skip independent file discovery. Uses `agent()` (engine primitive) instead of `Bash()`. Truncated to 500 lines max.
 - **Unanimity pre-digest (P2):** when ALL challengers independently verdict SOUND and benchmarks are clean, a note is prepended to Caesar's prompt to speed deliberation. Caesar still reads every report — the note reduces deliberation depth only when evidence is genuinely exhaustive.
 - **DAR-based challenger digest (P4):** before passing challenger reports to Caesar, SOUND challengers are compressed to 1-line stubs; non-SOUND challengers retain only BLOCKER/MAJOR objections + verdict. DAR insight: disagreements are maximally informative, agreements are redundant. Saves ~8-12% of Caesar's input tokens.
 - **Hybrid Caesar verdict (P3):** Caesar reasons freely in prose, then appends a structured JSON block for machine parsing. `structuredVerdict` in the return value is the parsed JSON (null if extraction failed). Preserves full reasoning quality while enabling downstream tooling.
