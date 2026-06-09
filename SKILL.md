@@ -1,6 +1,6 @@
 ---
 name: man:ultraflow
-description: "Multi-agent Workflow orchestration with ready-made templates. Runs parallel agents via Workflow engine (no env var needed, works on Sonnet). Templates: arena (router auto-picks ck: skills then PRODUCE→adversarial CONTEST→benchmark metrics→JUDGE — real test/lint numbers feed Caesar for mutating intents), bench (N solutions benchmarked with real metrics → objective winner), scout (parallel codebase search), brainstorm (N angles → synthesis), plan (research → phased plan), cook (scout→plan→parallel devs→test), fix (N competing hypotheses), debug (adversarial hypotheses), research (N researchers → synthesis), review (security/perf/coverage → merged findings). Usage: /man:ultraflow <template> <args> or /man:ultraflow --arena <prompt>. Trigger on: 'parallel agents', 'ultraflow', 'multi-agent workflow', 'run agents in parallel', 'adversarial', 'đối kháng'."
+description: "Multi-agent Workflow orchestration with ready-made templates. Runs parallel agents via Workflow engine (no env var needed, works on Sonnet). Templates: arena (router auto-picks ck: skills then PRODUCE→adversarial CONTEST+BENCH in parallel→DAR-digested critiques→hybrid verdict JUDGE — real test/lint numbers feed Caesar for mutating intents; artifact digest for large outputs, unanimity pre-digest, diversity-preserved model assignment, pre-computed diff context), bench (N solutions benchmarked with real metrics → objective winner), scout (parallel codebase search), brainstorm (N angles → synthesis), plan (research → phased plan), cook (scout→plan→parallel devs→test), fix (N competing hypotheses), debug (adversarial hypotheses), research (N researchers → synthesis), review (security/perf/coverage → merged findings). Usage: /man:ultraflow <template> <args> or /man:ultraflow --arena <prompt>. Trigger on: 'parallel agents', 'ultraflow', 'multi-agent workflow', 'run agents in parallel', 'adversarial', 'đối kháng'."
 user-invocable: true
 when_to_use: "Invoke when the user wants parallel multi-agent execution using the Workflow engine."
 category: dev-tools
@@ -8,7 +8,7 @@ keywords: [workflow, parallel, multi-agent, research, review, pipeline, plan, br
 argument-hint: "<template> <args> [--agents N] OR --arena <prompt>"
 metadata:
   author: user
-  version: "4.4.0"
+  version: "4.5.0"
 ---
 
 # Ultraflow — Parallel Agent Workflows
@@ -104,7 +104,7 @@ Extract the JS code block from the reference file verbatim. The only substitutio
 ## After Workflow completes
 
 - Report results to user in clean markdown
-- `arena`: routed intent + producer (Gladiator) / contesters (Challengers) used + Caesar's verdict (ACCEPT/REVISE/REJECT) + prioritized required actions, then run the **Arena ending** protocol below
+- `arena`: routed intent + producer (Gladiator) / contesters (Challengers) used + Caesar's verdict (ACCEPT/REVISE/REJECT) + prioritized required actions + `structuredVerdict` (parsed JSON from hybrid verdict, null if extraction failed), then run the **Arena ending** protocol below
 - `scout`: context map with file table + patterns + contracts + risks
 - `brainstorm`: synthesis with winner, trade-offs, next steps
 - `plan`: plan document path + phase summary; save to `./plans/`
@@ -145,3 +145,22 @@ After an `arena` run, read Caesar's FULL verdict text — verdict parsing stays 
 - `producer failed` (Gladiator) → offer to re-run, or use the ck: skill directly.
 - `all contesters failed` → the `artifact` is in the return; offer a manual `/ck:code-review` on it (do NOT "re-run the contest" — a re-run makes a new artifact, not a re-attack of the old one).
 - Partial coverage (challengers that reported < `agents`, visible in logs) → note the thinner adversarial coverage; consider re-running.
+
+## Arena Optimization Features (v4.5.0)
+
+Eight research-backed optimizations from the arena evolution study (see `plans/reports/researcher-260609-arena-evolution-optimization.md`). Combined realistic savings: ~15-25% tokens, 20-35% wall-clock on typical runs.
+
+| ID | Feature | Token savings | Speed gain | When active |
+|---|---|---|---|---|
+| P2 | Unanimity pre-digest for Caesar | ~5-8% Caesar output | +5-8% | All challengers SOUND + benchmarks clean |
+| P7 | Compact routing table | ~1% (~400 tokens) | — | Always (Lanista prompt) |
+| P5 | Parallel benchmarker + challengers | 0% | +20-30% | Mutating intents |
+| P4+DAR | Challenger digest with diversity-aware retention | ~8-12% Caesar input | — | Always (SOUND→stub, non-SOUND→BLOCKER/MAJOR only) |
+| P3 | Hybrid Caesar verdict (free-text + JSON) | ~5-8% output | — | Always (Caesar appends JSON block) |
+| P6 | Diversity-preserved model assignment | ~3-5% | — | Implement intent, N=3, mechanical 3rd angle |
+| P1 | Artifact digest for challengers | ~8-12% | +5% | Mutating intents, artifact >150 lines |
+| P9 | Pre-computed diff context | ~2-5% | +10% | Mutating intents |
+
+**Architectural strengths preserved:** separation of concerns (ck: skills untouched), schema-constrained routing (ROUTE_SCHEMA), distinct contest angles, model tier diversity (Lanista assigns), stateless round counter, benchmarker as objective ground truth.
+
+**Sources:** D3 budgeted stopping (arxiv:2410.04663), DAR diversity-aware retention (arxiv:2603.20640), "Let Me Speak Freely?" hybrid verdict (production patterns), OI-MAS confidence-aware routing (arxiv:2601.04861), CompactPrompt token pruning (arxiv:2510.18043v1), wrong-consensus rate (arxiv:2509.05396).

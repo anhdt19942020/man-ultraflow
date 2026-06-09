@@ -39,12 +39,11 @@ This is the meta-entry point: you give a plain prompt, the Lanista picks the rig
 ```javascript
 export const meta = {
   name: 'ultraflow-arena',
-  description: 'Lanista routes → Gladiator produces → Challengers contest → Benchmarker measures (mutating only) → Caesar judges (adversarial arena)',
+  description: 'Lanista routes → Gladiator produces → Challengers contest + Benchmarker measures in parallel (mutating only) → Caesar judges with DAR-digested critiques + hybrid verdict (adversarial arena)',
   phases: [
     { title: 'Tuyển binh', detail: 'Lanista đọc prompt → chọn Gladiator (producer), Challengers (contesters), số agent + mục tiêu công kích' },
     { title: 'Ra trận', detail: 'Gladiator chạy ck: skill được chọn để tạo sản phẩm' },
-    { title: 'Giao chiến', detail: 'N Challengers, mỗi người công kích theo một góc/giả thuyết riêng (contest_angles) — khác skill hoặc khác giả thuyết' },
-    { title: 'Đo lường', detail: 'Benchmarker chạy test/timing/LOC/lint thật trên worktree Gladiator — chỉ khi mutates_files=true' },
+    { title: 'Giao chiến + Đo lường', detail: 'N Challengers công kích song song (contest_angles) + Benchmarker chạy metrics song song (mutates_files only). Challengers receive digest for large artifacts (>150 lines, mutating) + pre-computed diff context.' },
     { title: 'Phán quyết', detail: 'Caesar phân xử với cả challenger critiques + benchmark metrics: ÂN XÁ (ACCEPT) / TÁI ĐẤU (REVISE) / KHAI TỬ (REJECT) + việc cần làm' },
   ],
 }
@@ -72,15 +71,18 @@ const useCkSkill = (name, dir) =>
 const MODELS = ['opus', 'sonnet', 'haiku']
 const modelOpt = (m) => (MODELS.includes(m) ? { model: m } : {})
 
+// Compact routing table — legend: intent|producer(dir)|mutates|N|contesters(dirs)|contest_targets
+// Contesters: name(dir) comma-separated. '+' prefix = conditional (add only if noted condition met).
 const ROUTING_TABLE = `
-- implement / code / build / add feature  → producer ck:cook (dir cook, mutates=true) | n=3 | contesters [ck:code-review (ck-code-review), ck:security (ck-security), ck:test (test)] | contest: logic bugs, exploitable holes, regressions, broken contracts, missing tests
-- plan / architect / design / roadmap     → producer ck:plan (dir ck-plan, mutates=false) | contesters [ck:predict (ck-predict), ck:scenario (ck-scenario)] | contest: false assumptions, missing edge cases, over-engineering, infeasibility
-- fix bug / error / failing test          → producer ck:fix (dir fix, mutates=true) | contesters [ck:debug (ck-debug), ck:code-review (ck-code-review), + ck:test (test) ONLY if the fix touches logic] | contest: wrong root cause, regressions, untested fix paths
-- debug / find root cause / why           → producer ck:debug (dir ck-debug, mutates=false) | contesters [ck:debug (ck-debug)] | contest: competing hypotheses — each investigator pursues a DISTINCT hypothesis assigned via contest_angles
-- research / find info / compare          → producer ck:research (dir research, mutates=false) | contesters [ck:research (research)] | contest: wrong/unsourced claims, missing data — each verifier takes a DISTINCT angle assigned via contest_angles (one seeks disconfirming sources)
-- security / audit / vulnerability        → producer ck:security (dir ck-security, mutates=false) | contesters [ck:security (ck-security)] | contest: exploitable holes
-- review code / review PR                 → producer ck:code-review (dir ck-code-review, mutates=false) | contesters [ck:code-review (ck-code-review), ck:security (ck-security)] | contest: missed bugs, exploitable holes
-- benchmark / bench / compare solutions → producer bench (dir bench, mutates=true) | n=3 | contesters [ck:code-review (ck-code-review), ck:test (test)] | contest: correctness of benchmark metrics, test flakiness affecting scores, winner selection logic, benchmark methodology fairness`
+LEGEND: intent keywords | producer skill(dir) | mutates | N | contesters skill(dir),... | contest targets
+impl/code/build/add feature | cook(cook) | T | 3 | code-review(ck-code-review),security(ck-security),test(test) | bugs,holes,regressions,contracts,missing-tests
+plan/architect/design/roadmap | plan(ck-plan) | F | 2-3 | predict(ck-predict),scenario(ck-scenario) | assumptions,edge-cases,overeng,infeasibility
+fix/error/failing test | fix(fix) | T | 2-3 | debug(ck-debug),code-review(ck-code-review),+test(test) IF fix touches logic | root-cause,regressions,untested-paths
+debug/root cause/why | debug(ck-debug) | F | 3 | debug(ck-debug) | competing hypotheses — DISTINCT hypothesis per contest_angle
+research/find info/compare | research(research) | F | 2-3 | research(research) | wrong/unsourced claims — DISTINCT angle per contest_angle (one seeks disconfirming)
+security/audit/vulnerability | security(ck-security) | F | 3 | security(ck-security) | exploitable holes
+review code/review PR | code-review(ck-code-review) | F | 3 | code-review(ck-code-review),security(ck-security) | missed bugs,holes
+bench/compare solutions | bench(bench) | T | 3 | code-review(ck-code-review),test(test) | metric correctness,flakiness,winner logic,fairness`
 
 const ROUTE_SCHEMA = {
   type: 'object',
@@ -146,7 +148,20 @@ const n = Math.max(2, Math.min(nOverride || route.n_agents || 2, 4))
 const contesterModels = Array.from({ length: n }, (_, i) => (route.contester_models || [])[i] || 'inherit')
 // One concrete attack angle per challenger; empty string falls back to the generic "distinct angle" instruction in the prompt.
 const contestAngles = Array.from({ length: n }, (_, i) => (route.contest_angles || [])[i] || '')
-log(`⚔️ Lanista điểm binh [vòng ${round}]: ${route.intent} (${route.complexity}) → Gladiator ${route.producer_skill} [${route.producer_model || 'inherit'}], ${n} Challengers ${route.contesters.map(c => c.name).join(', ')}, Caesar [${route.judge_model || 'inherit'}]`)
+
+// P6: Diversity-preserved model assignment — for implement intent with N=3,
+// downgrade the 3rd challenger to haiku ONLY when its angle is mechanical AND
+// the first two are both non-haiku. Preserves model diversity for all other cases.
+const downgradedModels = contesterModels.map((m, i) => {
+  if (route.intent === 'implement' && n === 3 && i === 2) {
+    const angle = contestAngles[i] || ''
+    const isMechanical = /lint|format|missing test|syntax|style|whitespace/i.test(angle)
+    const firstTwoNonHaiku = !contesterModels.slice(0, 2).includes('haiku')
+    if (isMechanical && firstTwoNonHaiku) return 'haiku'
+  }
+  return m
+})
+log(`⚔️ Lanista điểm binh [vòng ${round}]: ${route.intent} (${route.complexity}) → Gladiator ${route.producer_skill} [${route.producer_model || 'inherit'}], ${n} Challengers ${route.contesters.map(c => c.name).join(', ')} [models: ${downgradedModels.join(',')}], Caesar [${route.judge_model || 'inherit'}]`)
 
 phase('Ra trận')
 const artifact = await agent(
@@ -165,21 +180,52 @@ if (!artifact) {
   return { prompt, intent: route.intent, producer: route.producer_skill, error: 'producer failed' }
 }
 
-phase('Giao chiến')
-const critiques = await parallel(
-  Array.from({ length: n }, (_, i) => {
-    const adv = route.contesters[i % route.contesters.length]
-    return () =>
-      agent(
-        `${useCkSkill(adv.name, adv.dir)}
+// P1: Artifact digest — ONLY for mutating intents with large artifacts (>150 lines).
+// Challengers receive a compressed digest; they can read the full branch for BLOCKER findings.
+// Caesar always receives the full artifact. Non-mutating intents skip compression entirely.
+let challengerArtifact = artifact
+if (route.mutates_files && typeof artifact === 'string' && artifact.split('\n').length > 150) {
+  const digest = await agent(
+    `Compress this code artifact for adversarial review. Extract: function signatures, key logic changes, public API surface, changed imports. Keep under 30% of original length. Challengers will read the full code from the working directory for BLOCKER-level findings.\n\n${artifact}`,
+    { label: 'compressor', phase: 'Ra trận' }
+  )
+  challengerArtifact = digest || artifact // fallback to full on compressor failure
+  if (digest) log(`📦 Artifact compressed for challengers: ${artifact.split('\n').length} → ~${digest.split('\n').length} lines`)
+}
+
+// P9: Pre-computed diff context for challengers on mutating intents.
+// Passes structured diff to challengers so they skip independent file discovery.
+let diffContext = ''
+if (route.mutates_files) {
+  try {
+    const diff = await Bash('git diff HEAD~1 --stat && echo "---DIFF---" && git diff HEAD~1', { timeout: 15000 })
+    if (diff && diff.length < 20000) {
+      // Truncate raw diff to 500 lines max to avoid bloating challenger prompts
+      const diffLines = diff.split('\n')
+      diffContext = diffLines.length > 500
+        ? diffLines.slice(0, 500).join('\n') + '\n... (truncated, ' + diffLines.length + ' total lines)'
+        : diff
+    }
+  } catch (e) { /* diff unavailable — challengers will discover changes independently */ }
+}
+
+// P5: Parallel benchmarker + challengers — run Đo lường in parallel with Giao chiến
+// for mutating intents. Benchmarker reads the branch independently (no dependency on challengers).
+phase('Giao chiến' + (route.mutates_files ? ' + Đo lường' : ''))
+
+const challengerFns = Array.from({ length: n }, (_, i) => {
+  const adv = route.contesters[i % route.contesters.length]
+  return () =>
+    agent(
+      `${useCkSkill(adv.name, adv.dir)}
 
 You are CHALLENGER #${i + 1} of ${n}, wielding the ${adv.name} skill as your weapon. Your job: ATTACK the artifact below produced for this task — assume it is flawed until proven otherwise. Use your ${adv.name} skill as the tool to find concrete faults.${contestAngles[i] ? ` Your ASSIGNED angle of attack is: "${contestAngles[i]}" — commit to it, go deep, and stay in your lane; do not duplicate the other challengers' angles. Breadth across challengers beats overlapping objections.` : ` When other challengers share your weapon, attack from an angle distinct to your index (challenger-${i + 1}) — breadth across challengers beats duplicated objections.`}
 
 Original task: ${prompt}
 
 Artifact produced (by ${route.producer_skill}):
-${artifact}
-
+${challengerArtifact}
+${diffContext ? `\nPre-computed diff (Gladiator's changes — use this to locate affected files/lines instead of re-discovering independently):\n${diffContext}\n` : ''}
 Contest targets (attack these specifically): ${route.contest_targets.join('; ')}
 
 Rules:
@@ -188,25 +234,13 @@ Rules:
 - If you genuinely find nothing in your area, say so explicitly (do not invent issues).
 
 Report: ## Objections (rated, with evidence) / ## What holds up / ## Verdict (artifact is: SOUND / NEEDS-REVISION / REJECT)`,
-        { label: `challenger-${i + 1}-${adv.name.replace('ck:', '')}`, phase: 'Giao chiến', ...modelOpt(contesterModels[i]) }
-      )
-  })
-)
+      { label: `challenger-${i + 1}-${adv.name.replace('ck:', '')}`, phase: 'Giao chiến', ...modelOpt(downgradedModels[i]) }
+    )
+})
 
-const valid = critiques.filter(Boolean)
-log(`${valid.length}/${n} Challengers đã giao chiến`)
-
-if (valid.length === 0) {
-  log('Toàn bộ Challenger gục ngã — hủy trước khi Caesar phán quyết (không có công kích nào để cân nhắc)')
-  return { prompt, intent: route.intent, producer: route.producer_skill, artifact, error: 'all contesters failed' }
-}
-
-// Đo lường phase — only for mutating producers (cook/fix). Gladiator committed directly on current branch.
-// Gives Caesar objective numbers alongside challenger critiques.
-let benchMetrics = null
-if (route.mutates_files) {
-  phase('Đo lường')
-  benchMetrics = await agent(
+const benchmarkFn = async () => {
+  if (!route.mutates_files) return null
+  return agent(
     `You are the BENCHMARKER. The Gladiator committed changes directly on the current branch. Run measurements in the current working directory.\n\n` +
     `Run these 4 measurements and report EXACT numbers — no estimates:\n` +
     `1. **Tests**: run the project test suite (look for test scripts in package.json, Makefile, or composer.json). Report total/passed/failed/skipped.\n` +
@@ -226,36 +260,92 @@ if (route.mutates_files) {
     `NOTES: <relevant observations or N/A>`,
     { label: 'benchmarker', phase: 'Đo lường' }
   )
-  if (benchMetrics) {
-    const summary = benchMetrics.split('\n').filter(l => /^(TESTS_|LINT_|LOC_|TEST_TIME)/.test(l)).slice(0, 5).join(' | ')
-    log(`📊 Benchmark: ${summary}`)
-  }
 }
+
+// Run challengers and benchmarker in parallel — benchmarker is independent of challengers
+const [critiques, benchMetrics] = await parallel([
+  async () => {
+    const results = await parallel(challengerFns)
+    return results
+  },
+  benchmarkFn
+])
+
+if (benchMetrics) {
+  const summary = benchMetrics.split('\n').filter(l => /^(TESTS_|LINT_|LOC_|TEST_TIME)/.test(l)).slice(0, 5).join(' | ')
+  log(`📊 Benchmark: ${summary}`)
+}
+
+const valid = critiques.filter(Boolean)
+log(`${valid.length}/${n} Challengers đã giao chiến`)
+
+if (valid.length === 0) {
+  log('Toàn bộ Challenger gục ngã — hủy trước khi Caesar phán quyết (không có công kích nào để cân nhắc)')
+  return { prompt, intent: route.intent, producer: route.producer_skill, artifact, error: 'all contesters failed' }
+}
+
+// P2: Unanimity pre-digest — when ALL challengers verdict SOUND and benchmarks are clean,
+// prepend a note so Caesar can deliberate faster (but still reads every report).
+const allSound = valid.every(c => /SOUND/i.test(c))
+const benchClean = !benchMetrics || (/TESTS_FAILED:\s*0/.test(benchMetrics) && /LINT_ERRORS:\s*0/.test(benchMetrics))
+const unanimityNote = (allSound && benchClean)
+  ? `\nNOTE: All ${valid.length} challengers independently verdicted SOUND and benchmarks are clean. This increases prior probability of ACCEPT — but Caesar must still verify each challenger cited exhaustive evidence of what they checked, not just a SOUND token without citation.\n`
+  : ''
+
+// P4+DAR: Diversity-aware challenger digest for Caesar.
+// Compress SOUND challengers to stubs; for non-SOUND, retain BLOCKER/MAJOR + verdict only.
+// DAR insight: retain disagreements (maximally informative), compress agreements (redundant).
+const digestedCritiques = valid.map((c, i) => {
+  const isSound = /##\s*Verdict[\s\S]*?SOUND/i.test(c) || (/SOUND/i.test(c) && !/BLOCKER|MAJOR/i.test(c))
+  if (isSound) {
+    const angle = contestAngles[i] || `challenger-${i + 1}`
+    return `Challenger ${i + 1}: SOUND — exhaustively checked "${angle}", found no objections.`
+  }
+  // For non-SOUND challengers: keep full BLOCKER/MAJOR objections + verdict, drop MINOR-only sections
+  const blockerMajor = (c.match(/[-*]\s*\*\*(BLOCKER|MAJOR)\*\*[\s\S]*?(?=[-*]\s*\*\*(?:BLOCKER|MAJOR|MINOR)\*\*|##|$)/gi) || []).join('\n')
+  const verdictSection = c.match(/##\s*Verdict[\s\S]*?(?=##|$)/i)?.[0] || ''
+  const advName = route.contesters[i % route.contesters.length]?.name || `challenger-${i + 1}`
+  return `Challenger ${i + 1} (${advName}):\n${blockerMajor || '(no BLOCKER/MAJOR objections extracted — see full report)'}\n${verdictSection.trim()}`
+})
 
 phase('Phán quyết')
 const verdict = await agent(
   `You are CAESAR, the impartial judge presiding over the arena. Weigh the gladiator's artifact against the challengers' objections${benchMetrics ? ' AND the objective benchmark metrics' : ''} and rule.
 
 Contest coverage: ${valid.length} of ${n} challengers reported — weight partial rounds accordingly (fewer reports means thinner adversarial coverage, NOT implicit approval).
-
+${unanimityNote}
 Original task: ${prompt}
 
 Artifact (by ${route.producer_skill}):
 ${artifact}
 
-Challenger reports:
-${valid.map((c, i) => `=== Challenger ${i + 1} ===\n${c}`).join('\n\n')}
+Challenger reports (digested — SOUND challengers compressed to stubs, non-SOUND retain BLOCKER/MAJOR objections):
+${digestedCritiques.join('\n\n')}
 ${benchMetrics ? `\nObjective benchmark metrics (real numbers from the current branch — treat test failures as hard blockers regardless of challenger opinions):\n${benchMetrics}` : ''}
 
 Rule:
-1. **Verdict** (👑 the thumb): ACCEPT (👍 ÂN XÁ — ship as-is) / REVISE (✊ TÁI ĐẤU — fix listed items first) / REJECT (👎 KHAI TỬ — approach is wrong). Output the canonical token ACCEPT/REVISE/REJECT so downstream tooling can parse it.
+1. **Verdict** (the thumb): ACCEPT (ÂN XÁ — ship as-is) / REVISE (TÁI ĐẤU — fix listed items first) / REJECT (KHAI TỬ — approach is wrong). Output the canonical token ACCEPT/REVISE/REJECT so downstream tooling can parse it.
 2. **Upheld objections**: which BLOCKER/MAJOR objections are real (dismiss any that are wrong or non-issues — say why)
 3. **Required actions** (numbered, prioritized): exactly what to fix, where, how
 4. **One-line bottom line**
 
-Be decisive. A challenger being loud does not make an objection valid — judge on evidence. Benchmark numbers ARE evidence: failing tests override optimistic challenger verdicts.`,
+Be decisive. A challenger being loud does not make an objection valid — judge on evidence. Benchmark numbers ARE evidence: failing tests override optimistic challenger verdicts.
+
+After your full reasoning, append a JSON block (do not truncate your reasoning to fit the schema):
+\`\`\`json
+{
+  "verdict": "ACCEPT|REVISE|REJECT",
+  "upheld": [{"severity":"BLOCKER|MAJOR|MINOR","source":"challenger-N","summary":"<1 sentence>"}],
+  "required_actions": [{"priority":1,"action":"<what>","where":"<file:line or component>"}],
+  "bottom_line": "<1 sentence>"
+}
+\`\`\``,
   { label: 'caesar', phase: 'Phán quyết', ...modelOpt(route.judge_model) }
 )
+
+// P3: Extract structured verdict JSON from Caesar's hybrid output (free-text + JSON block)
+const jsonMatch = verdict && verdict.match(/```json\n([\s\S]*?)\n```/)
+const structuredVerdict = jsonMatch ? (() => { try { return JSON.parse(jsonMatch[1]) } catch (e) { return null } })() : null
 
 return {
   prompt,
@@ -265,13 +355,14 @@ return {
   producer: route.producer_skill,
   producerModel: route.producer_model,
   contesters: route.contesters.map(c => c.name),
-  contesterModels,
+  contesterModels: downgradedModels,
   contestAngles,
   judgeModel: route.judge_model,
   agents: n,
   mutatedFiles: route.mutates_files,
   benchMetrics,
   verdict,
+  structuredVerdict, // P3: parsed JSON from hybrid Caesar verdict (null if extraction failed)
 }
 ```
 
@@ -280,10 +371,17 @@ return {
 - **Trigger:** `/man:ultraflow --arena "<prompt>"` (or `arena <prompt>`). The Lanista decides everything else.
 - **`--agents N`** overrides the Lanista's challenger count (clamped 2-4).
 - **Auto model selection:** the Lanista assigns a model tier per agent (opus/sonnet/haiku) based on task complexity, and diversifies the challengers' models so different tiers catch different faults. Invalid/missing tiers fall back to the inherited session model (safe). The `agent()` `model` option is what makes this work.
+- **Diversity-preserved model assignment (P6):** for `implement` intent with N=3, the 3rd challenger is downgraded to haiku ONLY when its angle is mechanical (lint, format, syntax, missing tests) AND the first two are non-haiku. Preserves model diversity for all other cases — the core OI-MAS technique is already implemented via Lanista's `contesterModels`.
 - **Challenger labels keep their weapon:** each challenger is labelled `challenger-<N>-<skill>` (e.g. `challenger-1-code-review`, `challenger-2-security`, `challenger-3-test`) — the number tells them apart, the skill suffix shows what each is actually doing.
 - **Distinct attack angles (`contest_angles`):** adversarial value comes from non-overlapping angles, so the Lanista assigns each challenger one concrete angle. The mechanism matches the intent type: **artifact-producing** intents (implement/fix/review) diversify by *skill* — e.g. `implement` runs 3 lenses (code-review = logic/contracts, security = exploitable holes, test = coverage/regressions); **investigation** intents (debug/research) reuse one skill but diversify by *hypothesis* — each `ck:debug` investigator chases a different concrete root-cause lead, each `ck:research` verifier a different angle (one seeking disconfirming sources). If the Lanista omits an angle, that challenger falls back to the generic "distinct angle by index" instruction.
 - The adversarial structure lives entirely here; every agent still uses the original ck: skills as tools — ck: is never modified.
 - If the Gladiator mutated files (`ck:cook` / `ck:fix`), it commits directly on the current branch — no worktree isolation. Caesar's verdict determines next steps: on **ACCEPT** commit is already on branch, ready to push; on **REVISE** apply required actions then commit; on **REJECT** `git revert HEAD` to undo the Gladiator's commit.
 - **Post-verdict "ending":** after reporting the verdict, follow the closing protocol in `SKILL.md` → "Arena ending (post-verdict next steps)". Engine caveats: (1) round count = the returned `round` field (parsed from the prompt's `[TÁI ĐẤU vòng N]` tag — the engine is stateless between calls); (2) a follow-up `--arena` prompt MUST anchor the original intent (`[TÁI ĐẤU vòng <N+1> — intent: <intent>] …`) so the Lanista does not re-route to a different producer.
-- **Đo lường (benchmark support phase):** when the Gladiator mutates files, a Benchmarker agent runs real metrics (tests pass/fail, timing, LOC changed via `git diff HEAD~1`, lint errors) in the current working directory before Caesar judges. Caesar's prompt explicitly states "failing tests override optimistic challenger verdicts" — benchmark numbers are evidence, not suggestions. This phase is skipped for non-mutating intents (plan/research/debug/review). `benchMetrics` is included in the return value (null when skipped).
+- **Parallel Giao chiến + Đo lường (P5):** challengers and benchmarker now run in parallel for mutating intents. The benchmarker reads the branch independently — no dependency on challenger output. Saves 20-30% wall-clock time on mutating runs.
+- **Artifact digest (P1):** for mutating intents with large artifacts (>150 lines), a compressor agent generates a digest before distributing to challengers. Challengers receive the digest; Caesar always receives the full artifact. Non-mutating intents skip compression entirely. Graceful fallback to full artifact on compressor failure.
+- **Pre-computed diff context (P9):** for mutating intents, `git diff HEAD~1` output is pre-computed and included in challenger prompts so they skip independent file discovery. Truncated to 500 lines max.
+- **Unanimity pre-digest (P2):** when ALL challengers independently verdict SOUND and benchmarks are clean, a note is prepended to Caesar's prompt to speed deliberation. Caesar still reads every report — the note reduces deliberation depth only when evidence is genuinely exhaustive.
+- **DAR-based challenger digest (P4):** before passing challenger reports to Caesar, SOUND challengers are compressed to 1-line stubs; non-SOUND challengers retain only BLOCKER/MAJOR objections + verdict. DAR insight: disagreements are maximally informative, agreements are redundant. Saves ~8-12% of Caesar's input tokens.
+- **Hybrid Caesar verdict (P3):** Caesar reasons freely in prose, then appends a structured JSON block for machine parsing. `structuredVerdict` in the return value is the parsed JSON (null if extraction failed). Preserves full reasoning quality while enabling downstream tooling.
+- **Compact routing table (P7):** the Lanista's routing table uses a compressed format with a legend line, saving ~400 tokens per run.
 - Requires the ck: skills the router routes to (cook, ck-code-review, test, ck-plan, ck-predict, ck-scenario, fix, ck-debug, research, ck-security).
