@@ -108,8 +108,8 @@ Extract the JS code block from the reference file verbatim. The only substitutio
 - `scout`: context map with file table + patterns + contracts + risks
 - `brainstorm`: synthesis with winner, trade-offs, next steps
 - `plan`: plan document path + phase summary; save to `./plans/`
-- `cook`: dev completion count + test results; remind user to merge worktree branches (`git worktree list` → `git merge <branch>`)
-- `fix`: selected fix + what changed + verification; merge winning worktree branch
+- `cook`: dev completion count + test results; changes already committed on current branch — offer to push
+- `fix`: selected fix + what changed + verification; changes committed directly on current branch
 - `debug`: root cause + evidence chain + recommended fix
 - `research`: exec summary + key recommendations
 - `review`: counts (CRITICAL/IMPORTANT/MODERATE) + action items
@@ -118,22 +118,21 @@ Extract the JS code block from the reference file verbatim. The only substitutio
 
 ## Arena ending (post-verdict next steps)
 
-After an `arena` run, read Caesar's FULL verdict text — verdict parsing stays at YOUR layer, never trust a single token in isolation (the script does no verdict logic). The return gives you the data: `verdict` (full text), `round`, `intent`, `mutatedFiles`, `branch`, `agents`, and an `error` field on technical aborts. Present a short, actionable closing menu for the matched case.
+After an `arena` run, read Caesar's FULL verdict text — verdict parsing stays at YOUR layer, never trust a single token in isolation (the script does no verdict logic). The return gives you the data: `verdict` (full text), `round`, `intent`, `mutatedFiles`, `agents`, and an `error` field on technical aborts. Present a short, actionable closing menu for the matched case.
 
 **Safety rule (always):** ASK before any mutate / merge / commit / push. Only read-only steps (suggesting, saving a report) may run without asking. If the verdict token is unclear or missing, default to the SAFE side — treat as needs-human-review, never auto-ACCEPT.
 
 **👍 ACCEPT (ÂN XÁ) — ship it:**
 - Non-mutating intent (plan / research / review / debug): offer to save the report to `plans/reports/`, and suggest the natural next workflow step (e.g. plan → `/man:ultraflow cook`).
-- Mutating intent (cook / fix): a worktree `branch` exists. Resolve its path with `git worktree list`, then (ask first) `git merge <branch>` → `/ck:git` commit → optionally push → `git worktree remove <path>`.
-- `mutatedFiles` true but `branch` null: tell the user to find the branch via `git worktree list` (the Gladiator dropped its `BRANCH:` footer).
+- Mutating intent (cook / fix): Gladiator committed directly on the current branch. (Ask first) optionally push → `/ck:git` for commit message cleanup if needed.
 
 **✊ REVISE (TÁI ĐẤU) — fix upheld items, then let the user choose:**
 - **(a) Fix directly** with the ck: skill matching the ORIGINAL `intent`: implement → `/ck:cook` (or hand-edit), fix → `/ck:fix`, plan → `/ck:plan`, review code → `/ck:cook`/hand-edit then re-review (NOT `ck:fix` on a review report).
 - **(b) Re-enter the arena** with the auto-generated prompt (format below).
 - **Round cap (advisory):** if the returned `round` ≥ 3 and the verdict is still REVISE, do NOT offer path (b) — escalate to the user instead of looping.
-- Mutating intent: warn that a re-run may create a NEW branch (no `--branch` arg to reuse the old one) — guide a manual merge.
+- Mutating intent: re-run commits on top of the current branch — guide user to review `git log` before re-entering arena.
 
-**👎 REJECT (KHAI TỬ) — wrong approach, step back:** do NOT offer a same-approach re-run. Suggest `/man:ultraflow brainstorm "<problem>"` or `/man:ultraflow plan "<task>" --mode hard` to rethink. If a branch was created, offer to discard it (`git worktree list` → `git worktree remove` + `git branch -D`).
+**👎 REJECT (KHAI TỬ) — wrong approach, step back:** do NOT offer a same-approach re-run. Suggest `/man:ultraflow brainstorm "<problem>"` or `/man:ultraflow plan "<task>" --mode hard` to rethink. If Gladiator committed changes, offer to revert: `git revert HEAD` (safe) or `git reset --hard HEAD~1` (destructive — confirm first).
 
 **Auto-generated re-run prompt (REVISE path b)** — anchor the original intent and bump the round so the Lanista routes consistently and the counter survives a stateless engine:
 ```
