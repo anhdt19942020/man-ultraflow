@@ -1,6 +1,6 @@
 ---
 name: man:ultraflow
-description: "Multi-agent Workflow orchestration with ready-made templates. Runs parallel agents via Workflow engine (no env var needed, works on Sonnet). Templates: arena (router auto-picks ck: skills then PRODUCE→adversarial CONTEST+BENCH in parallel→DAR-digested critiques→hybrid verdict JUDGE — real test/lint numbers feed Caesar for mutating intents; artifact digest for large outputs, unanimity pre-digest, diversity-preserved model assignment, pre-computed diff context), bench (N solutions benchmarked with real metrics → objective winner), scout (parallel codebase search), brainstorm (N angles → synthesis), plan (research → phased plan), cook (scout→plan→parallel devs→test), fix (N competing hypotheses), debug (adversarial hypotheses), research (N researchers → synthesis), review (security/perf/coverage → merged findings). Usage: /man:ultraflow <template> <args> or /man:ultraflow --arena <prompt>. Trigger on: 'parallel agents', 'ultraflow', 'multi-agent workflow', 'run agents in parallel', 'adversarial', 'đối kháng'."
+description: "Multi-agent Workflow orchestration with ready-made templates. Runs parallel agents via Workflow engine (no env var needed, works on Sonnet). Templates: arena (router auto-picks ck: skills then PRODUCE→adversarial CONTEST+BENCH in parallel→DAR-digested critiques→hybrid verdict JUDGE — real test/lint numbers feed Caesar for mutating intents (test failures override critic verdicts); artifact digest for large outputs, unanimity pre-digest, diversity-preserved model assignment, pre-computed diff context), bench (N solutions benchmarked with real metrics → objective winner), scout (parallel codebase search), brainstorm (N angles → synthesis), plan (research → phased plan), cook (scout→plan→parallel devs→test), fix (N competing hypotheses), debug (adversarial hypotheses), research (N researchers → synthesis), review (security/perf/coverage → merged findings). Usage: /man:ultraflow <template> <args> or /man:ultraflow --arena <prompt>. Trigger on: 'parallel agents', 'ultraflow', 'multi-agent workflow', 'run agents in parallel', 'adversarial', 'đối kháng'."
 user-invocable: true
 when_to_use: "Invoke when the user wants parallel multi-agent execution using the Workflow engine."
 category: dev-tools
@@ -148,7 +148,7 @@ After an `arena` run, read Caesar's FULL verdict text — verdict parsing stays 
 
 ## Arena Optimization Features (v4.5.0)
 
-Eight research-backed optimizations from the arena evolution study (see `plans/reports/researcher-260609-arena-evolution-optimization.md`). Combined realistic savings: ~15-25% tokens, 20-35% wall-clock on typical runs.
+Eight research-backed optimizations from human-in-loop arena self-refinement rounds (the arena was pointed at its own template, Caesar judged, fixes applied by hand — not autonomous DGM-style self-rewriting). See `plans/reports/researcher-260609-arena-evolution-optimization.md`. Combined realistic savings: ~15-25% tokens, 20-35% wall-clock on typical runs.
 
 | ID | Feature | Token savings | Speed gain | When active |
 |---|---|---|---|---|
