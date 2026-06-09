@@ -39,19 +39,13 @@ const PROPOSAL_SCHEMA = {
 // ── Phase: Init ───────────────────────────────────────────────────────────────
 phase('Init')
 
-const [init_content, eval_script] = await parallel([
-  () => agent(
-    `Read the file at ${TEMPLATE} and return its COMPLETE content verbatim. Return ONLY the raw file content — no commentary, no markdown code fences, no truncation.`,
-    { label: 'read-template', model: 'haiku' }
-  ),
-  () => agent(
-    `Read the file at ${EVAL_JS} and return its COMPLETE content verbatim. Return ONLY the raw file content — no commentary, no markdown code fences, no truncation.`,
-    { label: 'read-eval-script', model: 'haiku' }
-  ),
-])
+const init_content = await agent(
+  `Read the file at ${TEMPLATE} and return its COMPLETE content verbatim. Return ONLY the raw file content — no commentary, no markdown code fences, no truncation.`,
+  { label: 'read-template', model: 'haiku' }
+)
 
-if (!init_content || !eval_script) {
-  log('Init failed: could not read baseline files. Check BASE path.')
+if (!init_content) {
+  log('Init failed: could not read template. Check BASE path.')
   return { error: 'init-failed', base: BASE }
 }
 
@@ -67,7 +61,7 @@ if (SKIP_BASELINE) {
   log(`Skipping baseline eval (known score: ${baseline_score}/16)`)
 } else {
   log('Running baseline eval...')
-  const baseline_result = await workflow({ script: eval_script }, { baseDir: BASE })
+  const baseline_result = await workflow({ scriptPath: EVAL_JS }, { baseDir: BASE })
   baseline_score = baseline_result?.score ?? 0
   log(`Baseline: ${baseline_score}/${baseline_result?.max ?? 16}`)
 }
@@ -166,7 +160,7 @@ No other output.`,
 
   // ── 3. Eval ──
   log(`Applied. Running eval...`)
-  const eval_result = await workflow({ script: eval_script }, { baseDir: BASE })
+  const eval_result = await workflow({ scriptPath: EVAL_JS }, { baseDir: BASE })
   const new_score = eval_result?.score ?? 0
   const failing = (eval_result?.cases || []).filter(c => c.total < 2).map(c => c.id)
 
