@@ -54,15 +54,26 @@ For each case:
 
 Automation requires a Workflow script that iterates over cases, calls `agent()` with each prompt, parses the `structuredVerdict` JSON block, and compares against `expected-outcomes.json`.
 
-## Self-improvement loop (planned)
+## Self-improvement loop
+
+Run via Workflow tool with `scriptPath: arena-eval/self-improve-loop.js`.
 
 ```
-ck:loop proposes change to references/template-arena.md
-  → run all 8 cases via Workflow (agent() calls)
-  → score verdicts against expected-outcomes.json
-  → if score >= 12: keep change
-  → if score < 12: revert
+Init: read template + eval script → run baseline eval
+Loop N rounds:
+  propose ONE change (sonnet) → apply (haiku Edit tool) → eval (8-case parallel) → keep if score ≥ best / revert
+Report: list kept improvements, score delta, commit recommendation
 ```
+
+**Args:**
+- `baseDir` (default `D:/Projects/man-ultraflow`)
+- `rounds` (default `3`) — each round ≈ 350K tokens (8 eval agents)
+- `focus` — `'routing'|'challenger'|'caesar'|'efficiency'|null`
+- `skip_baseline` — skip the baseline eval (use `known_score: 16` when you've just run it)
+
+The loop is a Workflow (not an agent), so it CAN call `workflow()` at the top level for the eval sub-workflow. Agents inside cannot — this is the nesting constraint that makes `run-eval-workflow.js` a separate top-level workflow.
+
+Since baseline is 16/16 (perfect), the loop finds changes that MAINTAIN the score while improving clarity or token efficiency. Any change that drops below 16 is reverted.
 
 See `plans/reports/researcher-260609-prior-art-comparable-systems.md` for the DGM vs human-in-loop context.
 
