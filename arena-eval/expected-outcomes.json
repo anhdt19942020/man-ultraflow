@@ -1,0 +1,86 @@
+{
+  "cases": [
+    {
+      "id": "case-01",
+      "file": "cases/case-01-implement-race-condition.md",
+      "intent": "implement",
+      "expected_verdict": ["REVISE", "REJECT"],
+      "must_find_keywords": ["race condition", "TOCTOU", "concurrent", "atomic", "duplicate", "upsert"],
+      "must_find_severity": "BLOCKER",
+      "tests": "challenger code-review catches concurrency bug; Caesar upholds it"
+    },
+    {
+      "id": "case-02",
+      "file": "cases/case-02-implement-clean-code.md",
+      "intent": "implement",
+      "expected_verdict": ["ACCEPT"],
+      "must_find_keywords": [],
+      "must_NOT_find_severity": ["BLOCKER", "MAJOR"],
+      "tests": "false-positive gate — arena must not invent issues on clean code"
+    },
+    {
+      "id": "case-03",
+      "file": "cases/case-03-security-sql-injection.md",
+      "intent": "security",
+      "expected_verdict": ["REJECT"],
+      "must_find_keywords": ["SQL injection", "injection", "f-string", "parameteris", "sanitise", "unsanitised"],
+      "must_find_severity": "BLOCKER",
+      "tests": "security challenger catches SQLi as BLOCKER; Caesar REJECTs (not just REVISEs)"
+    },
+    {
+      "id": "case-04",
+      "file": "cases/case-04-plan-false-assumption.md",
+      "intent": "plan",
+      "expected_verdict": ["REVISE", "REJECT"],
+      "must_find_keywords": ["rollback", "MULTI", "EXEC", "transaction", "Promise.all", "timeout", "race"],
+      "must_find_severity": "BLOCKER",
+      "tests": "predict/scenario challengers catch false technical assumptions in plan"
+    },
+    {
+      "id": "case-05",
+      "file": "cases/case-05-fix-wrong-root-cause.md",
+      "intent": "fix",
+      "expected_verdict": ["REJECT"],
+      "must_find_keywords": ["listener", "removeListener", "leak", "memory leak", "symptom", "root cause"],
+      "must_find_severity": "BLOCKER",
+      "tests": "debug challengers identify real root cause (listener leak) vs symptom treatment"
+    },
+    {
+      "id": "case-06",
+      "file": "cases/case-06-research-unsourced-claims.md",
+      "intent": "research",
+      "expected_verdict": ["REVISE"],
+      "must_find_keywords": ["consistent", "citation", "source", "100x", "wrong", "incorrect"],
+      "must_find_severity": "BLOCKER",
+      "tests": "research verifiers catch factually wrong consistency claim and unsourced performance claim"
+    },
+    {
+      "id": "case-07",
+      "file": "cases/case-07-implement-missing-error-handling.md",
+      "intent": "implement",
+      "expected_verdict": ["REVISE"],
+      "must_find_keywords": ["size", "validation", "MIME", "type", "partial failure", "S3", "orphan", "error handling"],
+      "must_find_min_major_count": 2,
+      "tests": "code-review and test challengers catch missing validation and partial-failure gap"
+    },
+    {
+      "id": "case-08",
+      "file": "cases/case-08-plan-overengineered.md",
+      "intent": "plan",
+      "expected_verdict": ["REVISE"],
+      "must_find_keywords": ["over-engineer", "YAGNI", "simpler", "scope", "Kafka", "Kubernetes", "disproportionate"],
+      "must_find_severity": "MAJOR",
+      "tests": "predict challenger flags YAGNI violation; Caesar does not accept 'technically sound' as sufficient"
+    }
+  ],
+  "scoring": {
+    "per_case": {
+      "verdict_match": 1,
+      "must_find_present": 1,
+      "total_per_case": 2
+    },
+    "total_max": 16,
+    "pass_threshold": 12,
+    "comment": "12/16 = 75% pass rate minimum. Below this, a template change is discarded by ck:loop."
+  }
+}
