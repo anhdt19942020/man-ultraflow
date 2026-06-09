@@ -31,6 +31,7 @@ This is the meta-entry point: you give a plain prompt, the Lanista picks the rig
 | research / find info / compare | `ck:research` | research verifiers (each assigned a DISTINCT angle via `contest_angles`; one chases disconfirming sources) | 2-3 | wrong/unsourced claims, missing data |
 | security / audit / vulnerability | `ck:security` | red-team attackers (`ck:security`) | 3 | exploitable holes |
 | review code | `ck:code-review` | `ck:code-review` + `ck:security` (if input/auth/storage) | 3 | missed bugs, exploitable holes |
+| benchmark / bench / compare solutions | `bench` (mutates) | `ck:code-review` + `ck:test` | 3 | correctness of benchmark metrics, test flakiness, winner selection logic |
 
 ## Workflow Script
 
@@ -76,7 +77,8 @@ const ROUTING_TABLE = `
 - debug / find root cause / why           → producer ck:debug (dir ck-debug, mutates=false) | contesters [ck:debug (ck-debug)] | contest: competing hypotheses — each investigator pursues a DISTINCT hypothesis assigned via contest_angles
 - research / find info / compare          → producer ck:research (dir research, mutates=false) | contesters [ck:research (research)] | contest: wrong/unsourced claims, missing data — each verifier takes a DISTINCT angle assigned via contest_angles (one seeks disconfirming sources)
 - security / audit / vulnerability        → producer ck:security (dir ck-security, mutates=false) | contesters [ck:security (ck-security)] | contest: exploitable holes
-- review code / review PR                 → producer ck:code-review (dir ck-code-review, mutates=false) | contesters [ck:code-review (ck-code-review), ck:security (ck-security)] | contest: missed bugs, exploitable holes`
+- review code / review PR                 → producer ck:code-review (dir ck-code-review, mutates=false) | contesters [ck:code-review (ck-code-review), ck:security (ck-security)] | contest: missed bugs, exploitable holes
+- benchmark / bench / compare solutions → producer bench (dir bench, mutates=true) | n=3 | contesters [ck:code-review (ck-code-review), ck:test (test)] | contest: correctness of benchmark metrics, test flakiness affecting scores, winner selection logic, benchmark methodology fairness`
 
 const ROUTE_SCHEMA = {
   type: 'object',

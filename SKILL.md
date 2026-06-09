@@ -1,6 +1,6 @@
 ---
 name: man:ultraflow
-description: "Multi-agent Workflow orchestration with ready-made templates. Runs parallel agents via Workflow engine (no env var needed, works on Sonnet). Templates: arena (router auto-picks ck: skills then PRODUCE→adversarial CONTEST→JUDGE), scout (parallel codebase search), brainstorm (N angles → synthesis), plan (research → phased plan), cook (scout→plan→parallel devs→test), fix (N competing hypotheses), debug (adversarial hypotheses), research (N researchers → synthesis), review (security/perf/coverage → merged findings). Usage: /man:ultraflow <template> <args> or /man:ultraflow --arena <prompt>. Trigger on: 'parallel agents', 'ultraflow', 'multi-agent workflow', 'run agents in parallel', 'adversarial', 'đối kháng'."
+description: "Multi-agent Workflow orchestration with ready-made templates. Runs parallel agents via Workflow engine (no env var needed, works on Sonnet). Templates: arena (router auto-picks ck: skills then PRODUCE→adversarial CONTEST→JUDGE), bench (N solutions benchmarked with real metrics → objective winner), scout (parallel codebase search), brainstorm (N angles → synthesis), plan (research → phased plan), cook (scout→plan→parallel devs→test), fix (N competing hypotheses), debug (adversarial hypotheses), research (N researchers → synthesis), review (security/perf/coverage → merged findings). Usage: /man:ultraflow <template> <args> or /man:ultraflow --arena <prompt>. Trigger on: 'parallel agents', 'ultraflow', 'multi-agent workflow', 'run agents in parallel', 'adversarial', 'đối kháng'."
 user-invocable: true
 when_to_use: "Invoke when the user wants parallel multi-agent execution using the Workflow engine."
 category: dev-tools
@@ -8,7 +8,7 @@ keywords: [workflow, parallel, multi-agent, research, review, pipeline, plan, br
 argument-hint: "<template> <args> [--agents N] OR --arena <prompt>"
 metadata:
   author: user
-  version: "4.2.0"
+  version: "4.3.0"
 ---
 
 # Ultraflow — Parallel Agent Workflows
@@ -30,6 +30,7 @@ Each template is **only an orchestrator**. The actual workflow logic is NOT reim
 | `debug` | `ck:debug` | `ck-debug` |
 | `research` | `ck:research` | `research` |
 | `review` | `ck:code-review` | `ck-code-review` |
+| `bench` | `ck:test` + `ck:code-review` | `test`, `ck-code-review` |
 
 **Dependency:** these templates require the listed ck: skills to be installed (ClaudeKit). If a ck: skill is missing, that template degrades to whatever the agent can do without it.
 
@@ -45,6 +46,7 @@ Each template is **only an orchestrator**. The actual workflow logic is NOT reim
 /man:ultraflow debug <issue> [--agents N]
 /man:ultraflow research <topic> [--agents N]
 /man:ultraflow review <scope> [--agents N]
+/man:ultraflow bench <task> [--agents N]
 ```
 
 ## Execution Protocol
@@ -66,6 +68,7 @@ When invoked, IMMEDIATELY:
 | `debug` | `references/template-debug.md` | `{ issue, n }` | 3 |
 | `research` | `references/template-research.md` | `{ topic, n }` | 3 |
 | `review` | `references/template-review.md` | `{ scope, n }` | 3 |
+| `bench` | `references/template-bench.md` | `{ task, n }` | 3 |
 
 **`--arena` flag** → run the `arena` template; pass everything after it as `args.prompt`. The router auto-picks the producer + adversary ck: skills and agent count. Example: `/man:ultraflow --arena "Add absence column to ticket"` → `Workflow({ script: <arena script>, args: { prompt: "Add absence column to ticket" } })`.
 **`--agents N` flag** → pass as `args.n` (in arena, overrides the router's count, clamped 2-4).
@@ -110,6 +113,7 @@ Extract the JS code block from the reference file verbatim. The only substitutio
 - `debug`: root cause + evidence chain + recommended fix
 - `research`: exec summary + key recommendations
 - `review`: counts (CRITICAL/IMPORTANT/MODERATE) + action items
+- `bench`: scorecard table with objective metrics (test pass/fail, timing, LOC, lint) + winner branch
 - Ask if user wants to save the report to `plans/reports/`
 
 ## Arena ending (post-verdict next steps)
