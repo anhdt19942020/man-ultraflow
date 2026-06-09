@@ -11,7 +11,8 @@ This is the meta-entry point: you give a plain prompt, the Lanista picks the rig
 | router | **Lanista** | Tuyển binh | Chọn đấu sĩ + kẻ khiêu chiến + số agent + mục tiêu công kích |
 | producer | **Gladiator** | Ra trận | Tạo sản phẩm (chạy ck: skill được chọn) |
 | contester | **Challenger** (`challenger-N-<skill>`) | Giao chiến | Công kích sản phẩm; nhãn giữ skill thật (vd `challenger-1-code-review`, `challenger-2-test`) |
-| judge | **Caesar** | Phán quyết | Phán xử 👍 ÂN XÁ / ✊ TÁI ĐẤU / 👎 KHAI TỬ (ACCEPT/REVISE/REJECT) |
+| benchmarker | **Benchmarker** | Đo lường | Đo test/timing/LOC/lint thật trên worktree — chỉ chạy khi mutates_files=true; cung cấp số liệu khách quan cho Caesar |
+| judge | **Caesar** | Phán quyết | Phán xử với cả challenger critiques + benchmark metrics: 👍 ÂN XÁ / ✊ TÁI ĐẤU / 👎 KHAI TỬ (ACCEPT/REVISE/REJECT) |
 
 ## Args
 
@@ -38,12 +39,13 @@ This is the meta-entry point: you give a plain prompt, the Lanista picks the rig
 ```javascript
 export const meta = {
   name: 'ultraflow-arena',
-  description: 'Lanista routes → Gladiator produces → Challengers contest → Caesar judges (adversarial arena)',
+  description: 'Lanista routes → Gladiator produces → Challengers contest → Benchmarker measures (mutating only) → Caesar judges (adversarial arena)',
   phases: [
     { title: 'Tuyển binh', detail: 'Lanista đọc prompt → chọn Gladiator (producer), Challengers (contesters), số agent + mục tiêu công kích' },
     { title: 'Ra trận', detail: 'Gladiator chạy ck: skill được chọn để tạo sản phẩm' },
     { title: 'Giao chiến', detail: 'N Challengers, mỗi người công kích theo một góc/giả thuyết riêng (contest_angles) — khác skill hoặc khác giả thuyết' },
-    { title: 'Phán quyết', detail: 'Caesar phân xử: ÂN XÁ (ACCEPT) / TÁI ĐẤU (REVISE) / KHAI TỬ (REJECT) + việc cần làm' },
+    { title: 'Đo lường', detail: 'Benchmarker chạy test/timing/LOC/lint thật trên worktree Gladiator — chỉ khi mutates_files=true' },
+    { title: 'Phán quyết', detail: 'Caesar phân xử với cả challenger critiques + benchmark metrics: ÂN XÁ (ACCEPT) / TÁI ĐẤU (REVISE) / KHAI TỬ (REJECT) + việc cần làm' },
   ],
 }
 
@@ -203,9 +205,41 @@ if (valid.length === 0) {
   return { prompt, intent: route.intent, producer: route.producer_skill, artifact, branch, error: 'all contesters failed' }
 }
 
+// Đo lường phase — only for mutating producers (cook/fix) with a known branch.
+// Gives Caesar objective numbers alongside challenger critiques.
+let benchMetrics = null
+if (route.mutates_files && branch) {
+  phase('Đo lường')
+  benchMetrics = await agent(
+    `You are the BENCHMARKER. The Gladiator implemented on branch "${branch}". Measure it with real commands.\n\n` +
+    `Find the worktree path: run \`git worktree list\` and locate the entry for branch "${branch}".\n\n` +
+    `Run these 4 measurements and report EXACT numbers — no estimates:\n` +
+    `1. **Tests**: run the project test suite (look for test scripts in package.json, Makefile, or composer.json). Report total/passed/failed/skipped.\n` +
+    `2. **Timing**: wall-clock seconds for the test run.\n` +
+    `3. **LOC changed**: \`git diff main --stat\` from the worktree — count lines added and removed.\n` +
+    `4. **Lint**: run the project linter. Report error count and warning count.\n\n` +
+    `If a command is missing or unavailable, report N/A for that metric and note why.\n\n` +
+    `Output format (strict — one key per line):\n` +
+    `TESTS_TOTAL: <number|N/A>\n` +
+    `TESTS_PASSED: <number|N/A>\n` +
+    `TESTS_FAILED: <number|N/A>\n` +
+    `TEST_TIME_S: <number|N/A>\n` +
+    `LOC_ADDED: <number|N/A>\n` +
+    `LOC_REMOVED: <number|N/A>\n` +
+    `LINT_ERRORS: <number|N/A>\n` +
+    `LINT_WARNINGS: <number|N/A>\n` +
+    `NOTES: <relevant observations or N/A>`,
+    { label: 'benchmarker', phase: 'Đo lường' }
+  )
+  if (benchMetrics) {
+    const summary = benchMetrics.split('\n').filter(l => /^(TESTS_|LINT_|LOC_|TEST_TIME)/.test(l)).slice(0, 5).join(' | ')
+    log(`📊 Benchmark: ${summary}`)
+  }
+}
+
 phase('Phán quyết')
 const verdict = await agent(
-  `You are CAESAR, the impartial judge presiding over the arena. Weigh the gladiator's artifact against the challengers' objections and rule.
+  `You are CAESAR, the impartial judge presiding over the arena. Weigh the gladiator's artifact against the challengers' objections${benchMetrics ? ' AND the objective benchmark metrics' : ''} and rule.
 
 Contest coverage: ${valid.length} of ${n} challengers reported — weight partial rounds accordingly (fewer reports means thinner adversarial coverage, NOT implicit approval).
 
@@ -216,6 +250,7 @@ ${artifact}
 
 Challenger reports:
 ${valid.map((c, i) => `=== Challenger ${i + 1} ===\n${c}`).join('\n\n')}
+${benchMetrics ? `\nObjective benchmark metrics (real numbers from the worktree — treat test failures as hard blockers regardless of challenger opinions):\n${benchMetrics}` : ''}
 
 Rule:
 1. **Verdict** (👑 the thumb): ACCEPT (👍 ÂN XÁ — ship as-is) / REVISE (✊ TÁI ĐẤU — fix listed items first) / REJECT (👎 KHAI TỬ — approach is wrong). Output the canonical token ACCEPT/REVISE/REJECT so downstream tooling can parse it.
@@ -223,7 +258,7 @@ Rule:
 3. **Required actions** (numbered, prioritized): exactly what to fix, where, how
 4. **One-line bottom line**
 
-Be decisive. A challenger being loud does not make an objection valid — judge on evidence.`,
+Be decisive. A challenger being loud does not make an objection valid — judge on evidence. Benchmark numbers ARE evidence: failing tests override optimistic challenger verdicts.`,
   { label: 'caesar', phase: 'Phán quyết', ...modelOpt(route.judge_model) }
 )
 
@@ -241,6 +276,7 @@ return {
   agents: n,
   mutatedFiles: route.mutates_files,
   branch,
+  benchMetrics,
   verdict,
 }
 ```
@@ -255,4 +291,5 @@ return {
 - The adversarial structure lives entirely here; every agent still uses the original ck: skills as tools — ck: is never modified.
 - If the Gladiator mutated files (`ck:cook` / `ck:fix`), it ran in an isolated worktree and only the branch NAME is returned (`branch` field) — the worktree PATH is not, so resolve it at runtime with `git worktree list` (filter by the branch) before any `git worktree remove`. Merge depends on Caesar's verdict: on **ACCEPT** merge as-is (`git merge <branch>`); on **REVISE** apply the required actions first, then merge; on **REJECT** discard (resolve conflicts manually). If `mutatedFiles` is true but `branch` is null (Gladiator dropped the `BRANCH:` footer), recover it via `git worktree list`.
 - **Post-verdict "ending":** after reporting the verdict, follow the closing protocol in `SKILL.md` → "Arena ending (post-verdict next steps)". Engine caveats it relies on: (1) round count = the returned `round` field (parsed from the prompt's `[TÁI ĐẤU vòng N]` tag — the engine is stateless between calls); (2) a follow-up `--arena` prompt MUST anchor the original intent (`[TÁI ĐẤU vòng <N+1> — intent: <intent>] …`) so the Lanista does not re-route to a different (mutating) producer; (3) there is no `--branch` arg — "same branch" is advisory, a mutating re-run may create a NEW branch.
+- **Đo lường (benchmark support phase):** when the Gladiator mutates files and a worktree branch is known, a Benchmarker agent runs real metrics (tests pass/fail, timing, LOC changed, lint errors) on that branch before Caesar judges. Caesar's prompt explicitly states "failing tests override optimistic challenger verdicts" — benchmark numbers are evidence, not suggestions. This phase is skipped for non-mutating intents (plan/research/debug/review) where no worktree exists. `benchMetrics` is included in the return value (null when skipped).
 - Requires the ck: skills the router routes to (cook, ck-code-review, test, ck-plan, ck-predict, ck-scenario, fix, ck-debug, research, ck-security).
