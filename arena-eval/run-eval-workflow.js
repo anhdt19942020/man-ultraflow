@@ -2,8 +2,8 @@ export const meta = {
   name: 'arena-eval',
   description: 'Score arena template against 8 ground-truth cases. Returns {score, max, passed_threshold, cases}',
   phases: [
-    { title: 'Evaluate', detail: 'Compressed arena simulation on all 8 cases in parallel (single agent per case reads template + applies routing/challenger/Caesar logic)' },
-    { title: 'Score', detail: 'Compare structured verdicts against expected-outcomes.json, compute total score (max 16, pass threshold 12)' },
+    { title: 'Evaluate', detail: 'Compressed arena simulation on all 11 cases in parallel (single agent per case reads template + applies routing/challenger/Caesar logic)' },
+    { title: 'Score', detail: 'Compare structured verdicts against expected-outcomes.json, compute total score (max 22, pass threshold 17)' },
   ],
 }
 
@@ -94,6 +94,37 @@ const CASES = [
     false_positive_gate: false,
     model: 'sonnet',
     hint: 'Compare the complexity of the proposed solution against the stated task. YAGNI.',
+  },
+  {
+    id: 'case-09',
+    file: 'case-09-implement-severity-inflation.md',
+    expected_verdicts: ['REVISE'],
+    must_find: ['timeout', 'hang', 'block', 'indefinitely'],
+    false_positive_gate: false,
+    model: 'sonnet',
+    hint: 'A concern exists (missing timeout) but it is theoretical — no test failure, no trace showing actual hang. Correct severity is MAJOR (real, fixable with one parameter) not BLOCKER (which requires demonstrated breakage). If a challenger labels it BLOCKER, Caesar may REJECT; the correct verdict is REVISE.',
+  },
+  {
+    id: 'case-10',
+    file: 'case-10-implement-benchmark-override.md',
+    expected_verdicts: ['REVISE'],
+    must_find: ['test', 'fail', 'failing', 'benchmark'],
+    false_positive_gate: false,
+    model: 'sonnet',
+    hint: 'The case file contains a "## Simulated benchmark output" section — treat those numbers as if the Benchmarker role produced them from actually running the test suite. Caesar MUST apply step 0: if TESTS_FAILED > 0, the verdict cannot be ACCEPT, regardless of what challengers say. Even if all challengers say SOUND, Caesar must choose REVISE and cite the failing tests.',
+  },
+  {
+    id: 'case-11',
+    file: 'case-11-fix-angle-separation.md',
+    expected_verdicts: ['REJECT'],
+    must_find: [],
+    must_find_groups: [
+      ['root cause', 'symptom', 'sliding', 'renew', 'session renewal', 'expir'],
+      ['regression', 'broad', 'except exception', 'databaseerror', 'operationalerror', 'mask', 'swallow'],
+    ],
+    false_positive_gate: false,
+    model: 'sonnet',
+    hint: 'Fix-intent uses two challengers: debug (verify whether the fix actually addresses the root cause) and code-review (check for regressions the fix introduces). The fix silences an exception but does not address why sessions expire — wrong root cause. Additionally, except Exception is dangerously broad and catches DB errors, allowing unauthenticated access during outages.',
   },
 ]
 
@@ -211,6 +242,13 @@ const scored = evaluations.filter(Boolean).map(({ case: c, verdict: v }) => {
     } else {
       find_score = keywordHit ? 1 : 0
     }
+  } else if (c.must_find_groups) {
+    // Case 11: all groups must have at least one keyword match (angle separation check)
+    const allSummaries = upheld.map(u => u.summary.toLowerCase()).join(' ')
+    const allGroupsMatch = c.must_find_groups.every(group =>
+      group.some(kw => allSummaries.includes(kw.toLowerCase()))
+    )
+    find_score = allGroupsMatch ? 1 : 0
   } else {
     find_score = 1 // no must-find requirement
   }
@@ -229,10 +267,10 @@ const scored = evaluations.filter(Boolean).map(({ case: c, verdict: v }) => {
 })
 
 const total_score = scored.reduce((sum, s) => sum + (s.total || 0), 0)
-const max_score = CASES.length * 2  // 16
+const max_score = CASES.length * 2  // 22
 const passed = scored.filter(s => s.total === 2)
 const failed = scored.filter(s => s.total < 2)
-const pass_threshold = 12
+const pass_threshold = 17
 
 log(`\n━━━ Arena Eval Results ━━━`)
 log(`Score: ${total_score}/${max_score} (threshold: ${pass_threshold}) — ${total_score >= pass_threshold ? '✅ PASS' : '❌ FAIL'}`)

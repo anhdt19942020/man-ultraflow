@@ -71,6 +71,34 @@
       "must_find_keywords": ["over-engineer", "YAGNI", "simpler", "scope", "Kafka", "Kubernetes", "disproportionate"],
       "must_find_severity": "MAJOR",
       "tests": "predict challenger flags YAGNI violation; Caesar does not accept 'technically sound' as sufficient"
+    },
+    {
+      "id": "case-09",
+      "file": "cases/case-09-implement-severity-inflation.md",
+      "intent": "implement",
+      "expected_verdict": ["REVISE"],
+      "must_find_keywords": ["timeout", "hang", "block", "indefinitely"],
+      "must_find_severity": "MAJOR",
+      "tests": "BLOCKER evidence requirement — missing timeout is MAJOR (theoretical), not BLOCKER (demonstrated); severity inflation causes over-rejection"
+    },
+    {
+      "id": "case-10",
+      "file": "cases/case-10-implement-benchmark-override.md",
+      "intent": "implement",
+      "expected_verdict": ["REVISE"],
+      "must_find_keywords": ["test", "fail", "failing", "benchmark"],
+      "tests": "Benchmark-first rule — Caesar must REVISE when TESTS_FAILED > 0 even if all challengers say SOUND"
+    },
+    {
+      "id": "case-11",
+      "file": "cases/case-11-fix-angle-separation.md",
+      "intent": "fix",
+      "expected_verdict": ["REJECT"],
+      "must_find_groups": [
+        ["root cause", "symptom", "sliding", "renew", "session renewal", "expir"],
+        ["regression", "broad", "except exception", "DatabaseError", "OperationalError", "mask", "swallow"]
+      ],
+      "tests": "Fix angle separation — debug finds wrong root cause (no session renewal), code-review finds dangerous broad except clause regression; both groups required"
     }
   ],
   "scoring": {
@@ -79,8 +107,8 @@
       "must_find_present": 1,
       "total_per_case": 2
     },
-    "total_max": 16,
-    "pass_threshold": 12,
-    "comment": "12/16 = 75% pass rate minimum. Below this, a template change is discarded by ck:loop."
+    "total_max": 22,
+    "pass_threshold": 17,
+    "comment": "17/22 = ~77% pass rate minimum. Below this, a template change is discarded by ck:loop."
   }
 }

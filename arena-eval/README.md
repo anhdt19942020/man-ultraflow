@@ -8,7 +8,7 @@ When the arena is pointed at its own template (`references/template-arena.md`) f
 
 **Score = number of cases where (a) Caesar's verdict matches expected AND (b) the required finding appears in Caesar's upheld list.**
 
-Max score: **16** (8 cases × 2 points each). Pass threshold: **12/16 (75%)**.
+Max score: **22** (11 cases × 2 points each). Pass threshold: **17/22 (77%)**.
 
 ## Cases
 
@@ -22,6 +22,9 @@ Max score: **16** (8 cases × 2 points each). Pass threshold: **12/16 (75%)**.
 | case-06 | research | REVISE | Research verifiers catch factually wrong claim + unsourced data |
 | case-07 | implement | REVISE | code-review + test catch missing validation and partial-failure gap |
 | case-08 | plan | REVISE | predict challenger catches YAGNI / over-engineering |
+| case-09 | implement | REVISE | **Severity inflation gate** — no-timeout concern must be MAJOR not BLOCKER |
+| case-10 | implement | REVISE | **Benchmark override** — Caesar must REVISE despite SOUND challengers when TESTS_FAILED > 0 |
+| case-11 | fix | REJECT | **Fix angle separation** — debug finds wrong root cause, code-review finds regression |
 
 ## Case format
 
