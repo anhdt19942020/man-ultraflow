@@ -8,7 +8,7 @@ When the arena is pointed at its own template (`references/template-arena.md`) f
 
 **Score = number of cases where (a) Caesar's verdict matches expected AND (b) the required finding appears in Caesar's upheld list.**
 
-Max score: **22** (11 cases × 2 points each). Pass threshold: **17/22 (77%)**.
+Max score: **30** (15 cases × 2 points each). Pass threshold: **23/30 (77%)**.
 
 ## Cases
 
@@ -25,6 +25,10 @@ Max score: **22** (11 cases × 2 points each). Pass threshold: **17/22 (77%)**.
 | case-09 | implement | REVISE | **Severity inflation gate** — no-timeout concern must be MAJOR not BLOCKER |
 | case-10 | implement | REVISE | **Benchmark override** — Caesar must REVISE despite SOUND challengers when TESTS_FAILED > 0 |
 | case-11 | fix | REJECT | **Fix angle separation** — debug finds wrong root cause, code-review finds regression |
+| case-12 | implement | REVISE/REJECT | **Minority BLOCKER wins** — security BLOCKER with evidence outweighs two SOUND challengers |
+| case-13 | implement | ACCEPT | **Challenger hallucination gate** — Caesar dismisses vague BLOCKER lacking file:line evidence |
+| case-14 | debug | REVISE | **Hypothesis diversity** — 3 debug challengers pursue distinct leads; Caesar picks evidence-backed root cause |
+| case-15 | research | REVISE | **Disconfirming angle** — one challenger seeks refuting sources and catches factually wrong claim |
 
 ## Case format
 
@@ -44,7 +48,7 @@ score per case:
   +1  Caesar verdict is in expected_verdict list
   +1  Caesar upheld[] contains a keyword from must_find_keywords (case-insensitive)
   ---
-  max 2 per case, 16 total
+  max 2 per case, 30 total
 ```
 
 ## How to run (manual — pre-automation)
@@ -70,13 +74,13 @@ Report: list kept improvements, score delta, commit recommendation
 
 **Args:**
 - `baseDir` (default `D:/Projects/man-ultraflow`)
-- `rounds` (default `3`) — each round ≈ 350K tokens (8 eval agents)
+- `rounds` (default `3`) — each round ≈ 550K tokens (15 eval agents)
 - `focus` — `'routing'|'challenger'|'caesar'|'efficiency'|null`
-- `skip_baseline` — skip the baseline eval (use `known_score: 16` when you've just run it)
+- `skip_baseline` — skip the baseline eval (use `known_score: 30` when you've just run it)
 
 The loop is a Workflow (not an agent), so it CAN call `workflow()` at the top level for the eval sub-workflow. Agents inside cannot — this is the nesting constraint that makes `run-eval-workflow.js` a separate top-level workflow.
 
-Since baseline is 16/16 (perfect), the loop finds changes that MAINTAIN the score while improving clarity or token efficiency. Any change that drops below 16 is reverted.
+Any change that drops below the pass threshold (23/30) is reverted.
 
 See `plans/reports/researcher-260609-prior-art-comparable-systems.md` for the DGM vs human-in-loop context.
 

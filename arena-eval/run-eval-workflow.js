@@ -1,9 +1,9 @@
 export const meta = {
   name: 'arena-eval',
-  description: 'Score arena template against 8 ground-truth cases. Returns {score, max, passed_threshold, cases}',
+  description: 'Score arena template against 15 ground-truth cases. Returns {score, max, passed_threshold, cases}',
   phases: [
-    { title: 'Evaluate', detail: 'Compressed arena simulation on all 11 cases in parallel (single agent per case reads template + applies routing/challenger/Caesar logic)' },
-    { title: 'Score', detail: 'Compare structured verdicts against expected-outcomes.json, compute total score (max 22, pass threshold 17)' },
+    { title: 'Evaluate', detail: 'Compressed arena simulation on all 15 cases in parallel (single agent per case reads template + applies routing/challenger/Caesar logic)' },
+    { title: 'Score', detail: 'Compare structured verdicts against expected-outcomes.json, compute total score (max 30, pass threshold 23)' },
   ],
 }
 
@@ -125,6 +125,42 @@ const CASES = [
     false_positive_gate: false,
     model: 'sonnet',
     hint: 'Fix-intent uses two challengers: debug (verify whether the fix actually addresses the root cause) and code-review (check for regressions the fix introduces). The fix silences an exception but does not address why sessions expire — wrong root cause. Additionally, except Exception is dangerously broad and catches DB errors, allowing unauthenticated access during outages.',
+  },
+  {
+    id: 'case-12',
+    file: 'case-12-implement-minority-blocker-wins.md',
+    expected_verdicts: ['REVISE', 'REJECT'],
+    must_find: ['role', 'authorization', 'admin', 'privilege', 'check'],
+    false_positive_gate: false,
+    model: 'sonnet',
+    hint: 'Two challengers (code-review, test) may find the code structurally clean. The security challenger must find the missing role/authorization check as a BLOCKER — any authenticated user can call admin endpoints. Caesar must uphold the BLOCKER and rule REVISE or REJECT regardless of the other two challengers\' SOUND verdicts. Evidence over vote count.',
+  },
+  {
+    id: 'case-13',
+    file: 'case-13-implement-challenger-hallucination.md',
+    expected_verdicts: ['ACCEPT'],
+    must_find: [],
+    false_positive_gate: true, // pass only if NO BLOCKER/MAJOR upheld
+    model: 'sonnet',
+    hint: 'This is intentionally clean JWT middleware with full test coverage. A poorly-calibrated security challenger might raise a vague BLOCKER ("JWT secret could be leaked") but there is no concrete exploit path in the code — the secret is loaded from env and never logged. Caesar must dismiss any BLOCKER lacking file:line and a concrete exploit path. The verdict must be ACCEPT.',
+  },
+  {
+    id: 'case-14',
+    file: 'case-14-debug-hypothesis-diversity.md',
+    expected_verdicts: ['REVISE'],
+    must_find: ['putconn', 'connection leak', 'pool', 'not returned', 'never released', 'commit'],
+    false_positive_gate: false,
+    model: 'opus',
+    hint: 'Debug intent — three challengers must pursue DISTINCT hypotheses. Hypothesis A (pool too small) is refuted by off-peak monotonic growth. Hypothesis B (slow queries) is refuted by the slow query log. Hypothesis C (connection never returned via putconn) is supported by the code (no putconn call) and log (monotonic pool growth). Caesar must select Hypothesis C as the evidence-backed root cause.',
+  },
+  {
+    id: 'case-15',
+    file: 'case-15-research-disconfirming-angle.md',
+    expected_verdicts: ['REVISE'],
+    must_find: ['transaction', 'multi-document', '4.0', 'acid', 'wrong', 'incorrect', 'supported'],
+    false_positive_gate: false,
+    model: 'sonnet',
+    hint: 'Research intent requires one challenger to seek disconfirming sources. The claim "MongoDB does not support multi-document ACID transactions" is factually wrong — MongoDB 4.0+ supports them. The disconfirming challenger must catch this. Caesar must REVISE citing the incorrect technical claim.',
   },
 ]
 
@@ -267,10 +303,10 @@ const scored = evaluations.filter(Boolean).map(({ case: c, verdict: v }) => {
 })
 
 const total_score = scored.reduce((sum, s) => sum + (s.total || 0), 0)
-const max_score = CASES.length * 2  // 22
+const max_score = CASES.length * 2  // 30
 const passed = scored.filter(s => s.total === 2)
 const failed = scored.filter(s => s.total < 2)
-const pass_threshold = 17
+const pass_threshold = 23
 
 log(`\n━━━ Arena Eval Results ━━━`)
 log(`Score: ${total_score}/${max_score} (threshold: ${pass_threshold}) — ${total_score >= pass_threshold ? '✅ PASS' : '❌ FAIL'}`)

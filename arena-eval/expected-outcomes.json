@@ -99,6 +99,39 @@
         ["regression", "broad", "except exception", "DatabaseError", "OperationalError", "mask", "swallow"]
       ],
       "tests": "Fix angle separation — debug finds wrong root cause (no session renewal), code-review finds dangerous broad except clause regression; both groups required"
+    },
+    {
+      "id": "case-12",
+      "file": "cases/case-12-implement-minority-blocker-wins.md",
+      "intent": "implement",
+      "expected_verdict": ["REVISE", "REJECT"],
+      "must_find_keywords": ["role", "authorization", "admin", "privilege", "check"],
+      "must_find_severity": "BLOCKER",
+      "tests": "Adversarial quality — minority BLOCKER (security: missing role check) must outweigh majority SOUND (code-review + test); Caesar weighs evidence not vote count"
+    },
+    {
+      "id": "case-13",
+      "file": "cases/case-13-implement-challenger-hallucination.md",
+      "intent": "implement",
+      "expected_verdict": ["ACCEPT"],
+      "must_NOT_find_severity": ["BLOCKER", "MAJOR"],
+      "tests": "Challenger hallucination gate — Caesar must dismiss vague BLOCKER without file:line evidence; clean JWT middleware must not be incorrectly flagged"
+    },
+    {
+      "id": "case-14",
+      "file": "cases/case-14-debug-hypothesis-diversity.md",
+      "intent": "debug",
+      "expected_verdict": ["REVISE"],
+      "must_find_keywords": ["putconn", "connection leak", "pool", "not returned", "never released", "commit"],
+      "tests": "Debug hypothesis diversity — 3 challengers pursue distinct leads; Caesar selects evidence-backed root cause (connection never returned to pool) over competing hypotheses"
+    },
+    {
+      "id": "case-15",
+      "file": "cases/case-15-research-disconfirming-angle.md",
+      "intent": "research",
+      "expected_verdict": ["REVISE"],
+      "must_find_keywords": ["transaction", "multi-document", "4.0", "acid", "wrong", "incorrect", "supported"],
+      "tests": "Research disconfirming angle — one challenger seeks refuting sources and catches factually wrong MongoDB transaction claim; Caesar REVISEs citing the incorrect technical statement"
     }
   ],
   "scoring": {
@@ -107,8 +140,8 @@
       "must_find_present": 1,
       "total_per_case": 2
     },
-    "total_max": 22,
-    "pass_threshold": 17,
-    "comment": "17/22 = ~77% pass rate minimum. Below this, a template change is discarded by ck:loop."
+    "total_max": 30,
+    "pass_threshold": 23,
+    "comment": "23/30 = ~77% pass rate minimum. Below this, a template change is discarded by ck:loop."
   }
 }
